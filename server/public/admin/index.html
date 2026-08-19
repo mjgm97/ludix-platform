@@ -424,16 +424,37 @@
     border:3px solid var(--line);border-top-color:var(--gold);animation:spin .7s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
   /* Import tab */
-  .imp-map{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:6px 0 4px}
   .imp-role{display:flex;flex-direction:column;gap:4px}
   .imp-role .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:800}
-  .imp-role select,.imp-role input{background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--ink);padding:9px 10px;font:inherit;font-size:13px;outline:none}
-  .imp-role select:focus,.imp-role input:focus{border-color:var(--gold)}
-  .imp-actor{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin:12px 0 2px;font-size:13px}
+  .imp-role select,.imp-role input,.imp-rolesel{background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--ink);padding:9px 10px;font:inherit;font-size:13px;outline:none}
+  .imp-role select:focus,.imp-role input:focus,.imp-rolesel:focus{border-color:var(--gold)}
+  .imp-actor{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin:14px 0 2px;font-size:13px}
   .imp-actor .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:800}
   .imp-actor label{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
   .imp-warn{background:#3a2a12;border:1px solid #6b4d1e;color:#ffd9a0;border-radius:8px;padding:8px 11px;font-size:12.5px;margin:6px 0}
-  .imp-prev table{font-size:12px}.imp-prev td,.imp-prev th{white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+  /* required-field status chips */
+  .imp-status{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 14px}
+  .imp-chip{display:inline-flex;align-items:center;gap:7px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:12.5px;color:var(--muted)}
+  .imp-chip b{color:var(--ink);font-weight:800}
+  .imp-chip i{width:8px;height:8px;border-radius:50%;background:var(--line);flex:none}
+  .imp-chip.ok{border-color:#2b5c3a}.imp-chip.ok i{background:var(--green)}
+  .imp-chip.req{border-color:#6b3030}.imp-chip.req i{background:var(--red)}.imp-chip.req b{color:#ff9aa2;font-weight:700}
+  .imp-chip.opt i{background:#3a4a68}
+  /* column-mapping table */
+  .imp-cols{width:100%;border-collapse:collapse;font-size:13px}
+  .imp-cols th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:800;padding:8px 12px;border-bottom:1px solid var(--line)}
+  .imp-cols td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+  .imp-cols tr.mapped td{background:#4ad6a00d}
+  .imp-cols tr.mapped .imp-cname{box-shadow:inset 3px 0 0 var(--green)}
+  .imp-cname b{font-weight:800}
+  .imp-cols .imp-rolesel{min-width:150px}
+  .imp-samp{display:flex;flex-wrap:wrap;gap:5px}
+  .imp-cv{display:inline-block;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:11.5px;color:#bcd0f5;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .t-badge{display:inline-block;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.03em}
+  .t-date{background:#12233f;color:#7fb3ff;border:1px solid #274a86}
+  .t-number{background:#132a20;color:#7fe0b0;border:1px solid #2b5c3a}
+  .t-text{background:#241f34;color:#c3aef5;border:1px solid #443a68}
+  .t-empty{background:var(--panel);color:var(--muted);border:1px solid var(--line)}
 </style>
 </head>
 <body>
