@@ -1,0 +1,41 @@
+# Citation metadata for Ludix — used by GitHub's "Cite this repository" button
+# and by the SoftwareX submission. Fill in every TODO before publishing.
+# Reference: https://citation-file-format.github.io/
+cff-version: 1.2.0
+message: "If you use this software, please cite it using these metadata."
+title: "Ludix: a game-agnostic suite backend with a learning-analytics dashboard"
+abstract: >-
+  Ludix is a suite that hosts many self-contained learning games behind one
+  Node/Express/SQLite backend and a game-agnostic educator dashboard. Games
+  post runs and events keyed by gameId; the dashboard provides engagement
+  metrics, process mining, transition-network analysis (TNA), and sequence
+  clustering with no per-game code.
+type: software
+authors:
+  - family-names: "Gómez Moratilla"        # TODO: verify
+    given-names: "Manuel Jesús"             # TODO: verify
+    affiliation: "Universidad de Murcia"    # TODO: verify
+    orcid: "https://orcid.org/0000-0000-0000-0000"  # TODO: add your ORCID
+    email: "manueljesus.gomezm@um.es"       # TODO: verify / replace
+license: MIT
+repository-code: "https://github.com/mjgm97/ludix"
+url: "https://github.com/mjgm97/ludix"
+version: "1.0.0"                             # TODO: set the released version
+date-released: "2026-01-01"                  # TODO: set the release date (YYYY-MM-DD)
+keywords:
+  - learning analytics
+  - educational games
+  - process mining
+  - transition network analysis
+  - sequence clustering
+  - serious games
+# When the SoftwareX article is published, add its DOI as a preferred citation:
+# preferred-citation:
+#   type: article
+#   title: "Ludix: ..."
+#   authors:
+#     - family-names: "Gómez Moratilla"
+#       given-names: "Manuel Jesús"
+#   journal: "SoftwareX"
+#   doi: "TODO"
+#   year: 2026

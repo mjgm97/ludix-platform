@@ -1,0 +1,12 @@
+{
+  "name": "ludix-game-quick-tap",
+  "version": "1.0.0",
+  "description": "Quick Tap — a tiny reaction game and the reference/demo game for the Ludix suite (built from games/_template).",
+  "private": true,
+  "scripts": {
+    "build": "API_BASE= node build.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

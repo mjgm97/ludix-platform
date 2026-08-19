@@ -1,0 +1,11 @@
+# build output — self-contained game bundles the suite server serves
+dist/
+# server runtime
+server/node_modules/
+server/data/
+server/.env
+*.db
+*.db-shm
+*.db-wal
+# os
+.DS_Store

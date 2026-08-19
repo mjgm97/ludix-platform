@@ -1,0 +1,23 @@
+{
+  "name": "suite-server",
+  "version": "1.0.0",
+  "description": "Tiny, game-agnostic score + analytics backend for a suite of games. Receives runs keyed by gameId + a unique username into one SQLite file, and can host many games (each at its own URL).",
+  "type": "commonjs",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "smoke": "node scripts/smoke.js",
+    "admin": "node scripts/admin.js",
+    "seed:demo": "node scripts/seed-demo.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}

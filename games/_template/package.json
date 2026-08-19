@@ -1,0 +1,12 @@
+{
+  "name": "ludix-game-template",
+  "version": "1.0.0",
+  "description": "Starter template for a Ludix suite game. Copy this folder to games/<your-game>/ and build it.",
+  "private": true,
+  "scripts": {
+    "build": "API_BASE= node build.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

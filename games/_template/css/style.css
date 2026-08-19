@@ -1,0 +1,46 @@
+/* Ludix game template — brand-consistent base styles.
+   Palette matches the suite (dark navy + gold/green, Fredoka/Nunito). */
+:root{
+  --bg:#0b1120; --bg2:#0e1626; --panel:#132039; --line:#2c3a58;
+  --ink:#eef2ff; --muted:#9fb2d6; --gold:#ffd54a; --green:#4ad6a0;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:radial-gradient(1200px 800px at 70% -10%,#16233d,var(--bg)) fixed;
+  color:var(--ink);font:16px/1.5 "Nunito",system-ui,-apple-system,sans-serif;
+  -webkit-font-smoothing:antialiased;display:grid;place-items:center;overflow:hidden;
+}
+
+#game{width:min(720px,96vw);height:min(560px,92vh);display:flex;flex-direction:column;
+  background:var(--bg2);border:1px solid var(--line);border-radius:20px;overflow:hidden;
+  box-shadow:0 30px 80px rgba(0,0,0,.5)}
+
+.hud{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:14px 20px;border-bottom:1px solid var(--line);background:rgba(19,32,57,.5)}
+.hud .title{font-family:"Fredoka",sans-serif;font-weight:600;font-size:18px}
+.hud .stat{display:flex;flex-direction:column;min-width:66px}
+.hud .stat:last-child{align-items:flex-end}
+.hud .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.hud .stat b{font-size:22px;font-variant-numeric:tabular-nums}
+
+.stage{position:relative;flex:1;overflow:hidden;
+  background:radial-gradient(600px 400px at 50% 30%,#12203a,transparent 70%)}
+
+.center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;text-align:center;padding:24px;gap:8px}
+.center h1{font-family:"Fredoka",sans-serif;font-weight:600;font-size:clamp(34px,8vw,56px);margin:0;
+  background:linear-gradient(90deg,var(--gold),var(--green));-webkit-background-clip:text;background-clip:text;color:transparent}
+.center p{color:var(--muted);max-width:340px;margin:0 0 8px}
+.play{margin-top:6px;border:none;border-radius:12px;padding:13px 26px;font:inherit;font-weight:800;
+  font-size:16px;cursor:pointer;color:#0b1120;background:linear-gradient(90deg,var(--gold),var(--green));
+  box-shadow:0 12px 30px rgba(74,214,160,.22);transition:transform .14s,box-shadow .14s}
+.play:hover{transform:translateY(-2px);box-shadow:0 18px 40px rgba(74,214,160,.3)}
+.play:disabled{opacity:.6;cursor:default;transform:none}
+
+.target{position:absolute;width:68px;height:68px;transform:translate(-50%,-50%);border-radius:50%;
+  border:none;cursor:pointer;padding:0;background:radial-gradient(circle at 35% 30%,#ffe27a,var(--gold));
+  box-shadow:0 0 0 4px rgba(255,213,74,.25),0 8px 20px rgba(0,0,0,.4);animation:pop .12s ease}
+.target:active{filter:brightness(1.1)}
+@keyframes pop{from{transform:translate(-50%,-50%) scale(.4)}to{transform:translate(-50%,-50%) scale(1)}}

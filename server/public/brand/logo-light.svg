@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="lockup" width="176" height="56" viewBox="0 0 176 56" fill="none"
+      role="img" aria-label="Ludix">
+    <defs><linearGradient id="l3" x1="6" y1="6" x2="42" y2="42" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#ffd54a"/><stop offset="1" stop-color="#4ad6a0"/></linearGradient>
+      <linearGradient id="u4" x1="61" y1="0" x2="152" y2="0" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#ffd54a"/><stop offset="1" stop-color="#4ad6a0"/>
+      </linearGradient>
+    </defs>
+    <g transform="translate(4 6) scale(0.9166666666666666)">
+    <rect width="48" height="48" rx="13" fill="url(#l3)"/>
+    <path d="M4 20 A13 13 0 0 1 20 4 L20 4 A20 20 0 0 0 4 22 Z" fill="#ffffff" opacity=".18"/>
+    <path d="M19.5 14.6 L19.5 32.6 a2.3 2.3 0 0 0 3.4 2 L35 26.6 a2.3 2.3 0 0 0 0-3.9 L22.9 15 a2.3 2.3 0 0 0 -3.4 2 Z" fill="#0b1120"/>
+    <path d="M33.5 9.9 Q34.396 14.604 39.1 15.5 Q34.396 16.396 33.5 21.1 Q32.604 16.396 27.9 15.5 Q32.604 14.604 33.5 9.9 Z" fill="#ffffff"/>
+    <path d="M33.5 13.1 Q33.884 15.116 35.9 15.5 Q33.884 15.884 33.5 17.9 Q33.116 15.884 31.1 15.5 Q33.116 15.116 33.5 13.1 Z" fill="#ffd54a"/>
+  </g>
+    <text x="60" y="40" font-family="Fredoka,'Segoe UI',system-ui,sans-serif" font-size="34"
+      font-weight="600" letter-spacing=".4" fill="#0b1120">Ludix</text>
+    <path d="M61 46 H144 q7 0 9 -5" stroke="url(#u4)" stroke-width="3.6" stroke-linecap="round" fill="none"/>
+    <path d="M160 13 Q160.8 17.2 165 18 Q160.8 18.8 160 23 Q159.2 18.8 155 18 Q159.2 17.2 160 13 Z" fill="#ffd54a"/><path d="M153 6.6 Q153.384 8.616 155.4 9 Q153.384 9.384 153 11.4 Q152.616 9.384 150.6 9 Q152.616 8.616 153 6.6 Z" fill="#4ad6a0"/>
+    
+  </svg>

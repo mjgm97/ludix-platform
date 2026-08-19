@@ -1,0 +1,26 @@
+{
+  "name": "ludix-suite",
+  "version": "1.0.0",
+  "description": "Ludix — a suite of learning games. One backend (server/) serves many self-contained games (games/*), each built into dist/ and hosted at its own URL, behind a shared score + analytics API and an educator dashboard.",
+  "license": "MIT",
+  "author": "Manuel Jesús Gómez Moratilla",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mjgm97/ludix.git"
+  },
+  "homepage": "https://github.com/mjgm97/ludix#readme",
+  "bugs": {
+    "url": "https://github.com/mjgm97/ludix/issues"
+  },
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build-all.js",
+    "start": "cd server && SERVE_STATIC=true npm start",
+    "dev": "cd server && SERVE_STATIC=true npm run dev",
+    "install:server": "cd server && npm install",
+    "smoke": "cd server && npm run smoke"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
