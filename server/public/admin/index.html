@@ -455,6 +455,30 @@
   .t-number{background:#132a20;color:#7fe0b0;border:1px solid #2b5c3a}
   .t-text{background:#241f34;color:#c3aef5;border:1px solid #443a68}
   .t-empty{background:var(--panel);color:var(--muted);border:1px solid var(--line)}
+  /* mapping quality verdict */
+  .imp-verdict{border:1px solid var(--line);border-left-width:3px;border-radius:10px;padding:11px 14px;margin:12px 0 4px;background:var(--bg2)}
+  .imp-verdict.ok{border-left-color:var(--green);background:#12251b}
+  .imp-verdict.warn{border-left-color:#e6b455;background:#2a230f}
+  .imp-verdict.blocked{border-left-color:var(--red);background:#2a1417}
+  .imp-v-head{font-size:13px;color:var(--ink)}
+  .imp-v-badge{display:inline-block;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;margin-right:8px;vertical-align:1px}
+  .imp-v-badge.ok{background:#16351f;border:1px solid #2b5c3a;color:#8ee6b0}
+  .imp-v-badge.warn{background:#3a2a12;border:1px solid #6b4d1e;color:#ffd9a0}
+  .imp-v-badge.blocked{background:#3a1214;border:1px solid #6b2b30;color:#ff9aa2}
+  .imp-v-list{margin:9px 0 2px;padding-left:2px;list-style:none;display:flex;flex-direction:column;gap:5px}
+  .imp-v-list li{font-size:12.5px;color:var(--muted);padding-left:20px;position:relative}
+  .imp-v-list li::before{position:absolute;left:0;top:0;font-weight:800}
+  .imp-v-blocked::before{content:"✕";color:var(--red)}
+  .imp-v-warn::before{content:"!";color:#e6b455}
+  .imp-v-ok::before{content:"✓";color:var(--green)}
+  .imp-v-info::before{content:"i";color:var(--blue);font-style:italic}
+  /* previous imports list */
+  .imp-list{width:100%;border-collapse:collapse;font-size:13px}
+  .imp-list th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:800;padding:8px 12px;border-bottom:1px solid var(--line)}
+  .imp-list td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+  .imp-list td.num,.imp-list th.num{text-align:right;font-variant-numeric:tabular-nums}
+  .imp-list .imp-l-file{color:#bcd0f5;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .imp-list .imp-del:hover{border-color:var(--red);color:#ff9aa2}
 </style>
 </head>
 <body>
