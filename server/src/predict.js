@@ -374,12 +374,15 @@ function compute(gameId, query) {
   const maxDepth = Math.max(1, Math.min(6, parseInt(query.maxDepth, 10) || 3));
 
   const availableFrom = (data) => {
-    const has = (fn) => data.runs.some(fn);
+    // A target is only trainable if it VARIES (≥2 distinct non-null values).
+    // This also correctly hides "score" for imports that created runs with no
+    // outcome column (all scores default to 0), and any game with uniform scores.
+    const varies = (fn) => { const s = new Set(); for (const r of data.runs) { const v = fn(r); if (v != null) { s.add(v); if (s.size > 1) return true; } } return false; };
     return {
-      score: has((r) => r.score != null),
-      stars: has((r) => r.stars != null),
+      score: varies((r) => r.score),
+      stars: varies((r) => r.stars),
       sessionLen: Object.keys(data.sessionFeat).length > 0,
-      pass: has((r) => r.score != null),
+      pass: varies((r) => r.score),
     };
   };
 

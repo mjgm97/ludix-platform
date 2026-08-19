@@ -38,6 +38,10 @@
       headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}),
     });
   }
+  function del(path) {
+    return fetch("/api/admin" + path, { method: "DELETE", credentials: "same-origin" })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { if (!r.ok) throw new Error(d.detail || d.error || ("http_" + r.status)); return d; }); });
+  }
 
   // ---- state ----------------------------------------------------------------
   var state = { user: null, games: [], players: [], gameId: null, from: "", to: "", player: "", tab: "overview" };
@@ -763,13 +767,15 @@
 
     v.innerHTML =
       '<div class="card"><div class="card-head"><h3>Import event data</h3></div>' +
-      '<p class="cap">Bring an existing event log (CSV or JSON) into a game so the whole dashboard — General, Process, Network, clustering — runs on it. Each row needs a case/session, an activity, and an order (a sequence column, or a timestamp to sort by). A Ludix export re-imports as-is.</p>' +
+      '<p class="cap">Bring an existing event log (CSV or JSON) into a game so the whole dashboard — General, Process, Network, clustering — runs on it. Each row needs a case/session, an activity, and an order (a sequence column, or a timestamp to sort by). Add a <b>score</b>, <b>stars</b>, or <b>level</b> column to also unlock the Prediction tab. A Ludix export re-imports as-is.</p>' +
       '<div class="toolbar"><input type="file" id="impFile" accept=".csv,.tsv,.json,.txt" style="display:none">' +
       '<button class="btn sm" id="impPick">Choose a CSV or JSON file</button>' +
       '<span class="muted small" id="impName">No file selected</span></div>' +
       '<div class="err" id="impErr"></div></div>' +
-      '<div id="impResult"></div>';
+      '<div id="impResult"></div>' +
+      '<div id="impList"></div>';
 
+    loadImports();
     $("#impPick").addEventListener("click", function () { $("#impFile").click(); });
     $("#impFile").addEventListener("change", function (e) {
       var f = e.target.files && e.target.files[0]; if (!f) return;
@@ -794,6 +800,9 @@
       { key: "timestamp", label: "Timestamp", req: false },
       { key: "actor", label: "Actor / user", req: false },
       { key: "seq", label: "Sequence order", req: false },
+      { key: "score", label: "Score (outcome)", req: false },
+      { key: "stars", label: "Stars (outcome)", req: false },
+      { key: "level", label: "Level", req: false },
     ];
 
     function suggestGame() {
@@ -830,8 +839,8 @@
     }
 
     function renderMapping(a) {
+      st.analysis = a;   // kept so updateStatus can re-judge mapping quality live
       var badge = a.isLudixExport ? '<span class="pill">Ludix export</span>' : '<span class="pill">' + esc(String(a.format).toUpperCase()) + "</span>";
-      var warn = (a.warnings || []).map(function (w) { return '<div class="imp-warn">' + esc(w) + "</div>"; }).join("");
       var roleOpts = function (selRole) {
         return '<option value="none">— ignore —</option>' + ROLES.map(function (R) {
           return '<option value="' + R.key + '"' + (selRole === R.key ? " selected" : "") + ">" + esc(R.label) + "</option>";
@@ -848,7 +857,8 @@
 
       $("#impResult").innerHTML =
         '<div class="card"><div class="card-head"><h3>Map your columns</h3>' + badge + ' <span class="pill">' + fmt(a.rowCount) + " rows</span></div>" +
-        '<p class="cap">Assign each column in your file to a target field. <b>Case</b> and <b>Activity</b> are required; a <b>timestamp</b> adds date filters and session durations. We auto-detected the mapping below — adjust anything that looks off.</p>' + warn +
+        '<p class="cap">Assign each column in your file to a target field. <b>Case</b> and <b>Activity</b> are required; a <b>timestamp</b> adds date filters and session durations; a <b>score</b>/<b>stars</b> column unlocks prediction. We auto-detected the mapping below — adjust anything that looks off.</p>' +
+        '<div id="impVerdict"></div>' +
         '<div class="imp-status" id="impStatus"></div>' +
         '<div class="tbl-wrap"><table class="imp-cols"><thead><tr><th>Your column</th><th>Type</th><th>Sample values</th><th>Maps to</th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
         '<div class="imp-actor" id="impActorRow"><span class="k">With no actor column, use</span>' +
@@ -873,24 +883,81 @@
       updateStatus();
     }
 
-    // Live required-field status + row highlight + import-button gating.
+    // Judge whether the chosen columns are good enough to import — reuses the
+    // per-column stats analyze() returned, so it re-runs on every remap with no
+    // server round-trip. Returns { level: ok|warn|blocked, messages:[{lvl,text}] }.
+    function assessReadiness(m) {
+      var a = st.analysis || {}, stats = a.columnStats || {}, rowCount = a.rowCount || 0;
+      var msgs = [], level = "ok";
+      function bump(l) { if (l === "blocked") level = "blocked"; else if (l === "warn" && level !== "blocked") level = "warn"; }
+      function add(l, t) { msgs.push({ lvl: l, text: t }); bump(l === "info" ? "ok" : l); }
+      var uniqueish = function (s) { return s && rowCount > 20 && s.distinctRatio > 0.95; };
+
+      // Activity — required, needs variety to be meaningful.
+      if (!m.activity) add("blocked", "Assign an Activity / event column — the analytics can’t run without it.");
+      else {
+        var av = stats[m.activity] || {};
+        if (av.fill < 0.5) add("blocked", "The Activity column is empty in most rows — pick a fuller column.");
+        else if (av.distinct <= 1) add("warn", "Only one distinct activity — the Process and Network views need more than one event type.");
+        else if (uniqueish(av)) add("warn", "Almost every row has a different activity — that looks like an ID, not an event type.");
+      }
+      // Case / session — recommended.
+      if (!m.session) add("warn", "No Case / session column — every row is folded into one session, so sequences won’t be meaningful.");
+      else {
+        var sv = stats[m.session] || {};
+        if (sv.fill < 0.5) add("warn", "The Case column is empty in most rows — those rows fall back to a single session.");
+        else if (uniqueish(sv)) add("warn", "Almost every row is its own case — each session will hold a single event.");
+      }
+      // Order — timestamp or explicit sequence.
+      if (m.timestamp) {
+        var tv = stats[m.timestamp] || {};
+        if (tv.tsParseRate < 0.5) add("warn", "Most values in the Timestamp column don’t parse as dates — check the column, or map a Sequence column instead.");
+      } else if (!m.seq) {
+        add("info", "No Timestamp or Sequence column — events keep file order, and date filters and session durations stay off.");
+      }
+      // Outcome — enables the Prediction tab.
+      var oc = m.score || m.stars;
+      if (oc) {
+        var ov = stats[oc] || {};
+        if (ov.numericRate < 0.5) add("warn", "The outcome column isn’t mostly numeric — prediction will be weak. A score/stars column should be numbers.");
+        else add("ok", "An outcome column is mapped — the Prediction tab will train on it.");
+      } else {
+        add("info", "Tip: map a Score or Stars column to predict outcomes. Without one, only “Session length” can be predicted.");
+      }
+      return { level: level, messages: msgs };
+    }
+
+    // Live required-field status + quality verdict + row highlight + gating.
     function updateStatus() {
       var m = currentMapping();
       $("#impStatus").innerHTML = ROLES.map(function (R) {
         var col = m[R.key], cls = col ? "ok" : (R.req ? "req" : "opt");
         return '<span class="imp-chip ' + cls + '"><i></i>' + esc(R.label) + ": <b>" + (col ? esc(col) : (R.req ? "required" : "not set")) + "</b></span>";
       }).join("");
+
+      var verdict = assessReadiness(m), vel = $("#impVerdict");
+      if (vel) {
+        var head = verdict.level === "blocked"
+          ? '<span class="imp-v-badge blocked">Not ready</span> Fix the blocking issue below before importing.'
+          : verdict.level === "warn"
+            ? '<span class="imp-v-badge warn">Importable, with caveats</span> These won’t block the import, but may weaken the analytics.'
+            : '<span class="imp-v-badge ok">Ready to import</span> The mapping looks good.';
+        var items = verdict.messages.map(function (mm) { return '<li class="imp-v-' + mm.lvl + '">' + esc(mm.text) + "</li>"; }).join("");
+        vel.innerHTML = '<div class="imp-verdict ' + verdict.level + '"><div class="imp-v-head">' + head + "</div>" +
+          (items ? '<ul class="imp-v-list">' + items + "</ul>" : "") + "</div>";
+      }
+
       [].forEach.call($("#impResult").querySelectorAll("tr[data-col]"), function (tr) {
         var s = tr.querySelector("select.imp-rolesel");
         tr.className = s && s.value !== "none" ? "mapped" : "";
       });
       var actorRow = $("#impActorRow"), hasActor = !!m.actor;
       if (actorRow) { actorRow.style.opacity = hasActor ? ".4" : ""; [].forEach.call(actorRow.querySelectorAll("input"), function (i) { i.disabled = hasActor; }); }
-      var go = $("#impGo"); if (go) go.disabled = !m.activity;
+      var go = $("#impGo"); if (go) { go.disabled = verdict.level === "blocked"; go.title = verdict.level === "blocked" ? "Resolve the blocking issue first" : ""; }
     }
 
     function currentMapping() {
-      var m = { session: null, activity: null, timestamp: null, actor: null, seq: null };
+      var m = { session: null, activity: null, timestamp: null, actor: null, seq: null, score: null, stars: null, level: null };
       [].forEach.call($("#impResult").querySelectorAll("select.imp-rolesel"), function (s) {
         var role = s.value; if (role && role !== "none") m[role] = s.getAttribute("data-col");
       });
@@ -926,12 +993,16 @@
       $("#impResult").innerHTML =
         '<div class="card"><div class="card-head"><h3>Imported into “' + esc(s.gameId) + '”</h3>' +
         '<span class="pill" style="background:#16351f;border-color:#2b5c3a;color:#8ee6b0">done</span></div>' +
-        '<div class="row-tiles">' + miniTile("Events", fmt(s.events)) + miniTile("Sessions", fmt(s.sessions)) +
+        '<div class="row-tiles">' + miniTile("Events", fmt(s.events)) + miniTile("Runs", fmt(s.runs)) + miniTile("Sessions", fmt(s.sessions)) +
         miniTile("Activities", fmt(s.activities)) + miniTile("Players added", fmt(s.playersCreated)) + "</div>" +
+        '<p class="muted small">' + (s.hasOutcome
+          ? "An outcome column was mapped, so the <b>Prediction</b> tab can now train a model for this game."
+          : "One run per session was created — the <b>Prediction</b> tab can model <b>Session length</b>. Map a score/stars column next time to predict outcomes too.") + "</p>" +
         (s.unparsedTimestamps ? '<p class="muted small">' + fmt(s.unparsedTimestamps) + " rows had an unreadable timestamp and were ordered by file position.</p>" : "") +
         (s.dateRange ? '<p class="muted small">Date range: ' + esc(s.dateRange.from) + " → " + esc(s.dateRange.to) + "</p>" : "") +
         '<div class="toolbar" style="margin-top:12px"><button class="btn primary sm" id="impOpen">Open the ' + esc(s.gameId) + ' dashboard</button>' +
         '<button class="btn ghost sm" id="impAgain">Import another file</button></div></div>';
+      loadImports();
       $("#impOpen").addEventListener("click", function () {
         api("/overview").then(function (d) {
           state.games = d.games;
@@ -943,6 +1014,53 @@
         });
       });
       $("#impAgain").addEventListener("click", function () { renderImport(v); });
+    }
+
+    // ---- Previous imports (removable batches) -------------------------------
+    function loadImports() {
+      api("/imports").then(function (d) { renderImports(d.imports || []); }).catch(function () {});
+    }
+    function renderImports(list) {
+      var el = $("#impList"); if (!el) return;
+      if (!list.length) { el.innerHTML = ""; return; }
+      var rows = list.map(function (im) {
+        var when = String(im.createdAt || "").replace("T", " ").slice(0, 16);
+        return '<tr data-id="' + im.id + '">' +
+          '<td><b>' + esc(im.gameId) + "</b></td>" +
+          '<td class="imp-l-file">' + esc(im.filename || "—") + "</td>" +
+          '<td class="num">' + fmt(im.events || 0) + "</td>" +
+          '<td class="num">' + fmt(im.runs || 0) + "</td>" +
+          '<td class="num">' + fmt(im.sessions || 0) + "</td>" +
+          '<td class="muted small">' + esc(when) + "</td>" +
+          '<td><button class="btn ghost sm imp-del" data-id="' + im.id + '" data-game="' + esc(im.gameId) + '" data-ev="' + (im.events || 0) + '">Delete</button></td></tr>';
+      }).join("");
+      el.innerHTML =
+        '<div class="card"><div class="card-head"><h3>Previous imports</h3><span class="pill">' + fmt(list.length) + "</span></div>" +
+        '<p class="cap">Each import is its own batch. Deleting one removes exactly its events and runs — and any players it created — leaving every other import and native game data untouched.</p>' +
+        '<div class="err" id="impDelErr"></div>' +
+        '<div class="tbl-wrap"><table class="imp-list"><thead><tr><th>Game</th><th>File</th><th class="num">Events</th><th class="num">Runs</th><th class="num">Sessions</th><th>Imported</th><th></th></tr></thead><tbody>' + rows + "</tbody></table></div></div>";
+      [].forEach.call(el.querySelectorAll(".imp-del"), function (b) {
+        b.addEventListener("click", function () { delImport(b); });
+      });
+    }
+    function delImport(btn) {
+      var id = btn.getAttribute("data-id"), game = btn.getAttribute("data-game"), ev = fmt(btn.getAttribute("data-ev"));
+      var derr = $("#impDelErr"); if (derr) derr.textContent = "";
+      if (!window.confirm("Delete this import into “" + game + "” (" + ev + " events)?\nIts events and runs will be permanently removed. This cannot be undone.")) return;
+      btn.disabled = true; btn.textContent = "Deleting…";
+      del("/imports/" + encodeURIComponent(id))
+        .then(function () {
+          loadImports();
+          // Refresh the game list/overview so an emptied game drops out of filters.
+          api("/overview").then(function (d) {
+            state.games = d.games;
+            var sel = $("#fGame");
+            sel.innerHTML = d.games.length ? d.games.map(function (g) { return '<option value="' + esc(g.gameId) + '">' + esc(g.gameId) + "</option>"; }).join("") : '<option value="">(no games yet)</option>';
+            if (!d.games.some(function (g) { return g.gameId === state.gameId; })) state.gameId = d.games.length ? d.games[0].gameId : null;
+            if (gameDD) gameDD.refresh();
+          }).catch(function () {});
+        })
+        .catch(function (e) { btn.disabled = false; btn.textContent = "Delete"; if (derr) derr.textContent = e.message; });
     }
   }
 

@@ -478,6 +478,22 @@ function mount(router) {
     res.json({ gameId: req.query.game || null, events: importer.existingEventCount(req.query.game || "") });
   });
 
+  // ---- Import batches: list + delete ----------------------------------------
+  // Each commit registers an `imports` row; its events + synthetic runs carry
+  // that id, so an import can be removed as a unit.
+  router.get("/imports", (req, res) => {
+    try { res.json({ imports: importer.listImports(req.query.game || null) }); }
+    catch (e) { importErr(res, e); }
+  });
+
+  router.delete("/imports/:id", (req, res) => {
+    try {
+      const out = importer.deleteImport(req.params.id);
+      if (!out) return res.status(404).json({ error: "not_found", detail: "No such import." });
+      res.json(out);
+    } catch (e) { importErr(res, e); }
+  });
+
   function importErr(res, e) {
     if (e instanceof importer.ImportError) return res.status(400).json({ error: "import_failed", detail: e.message });
     console.error("import error:", e);

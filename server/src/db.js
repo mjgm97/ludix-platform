@@ -92,6 +92,41 @@ db.exec(`
     expires_at TEXT    NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_admin_sessions_admin ON admin_sessions(admin_id);
+
+  -- One row per data import (Import tab). Lets an import be listed and removed as
+  -- a single unit: its events + synthetic runs carry this row's id in import_id.
+  CREATE TABLE IF NOT EXISTS imports (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id         TEXT    NOT NULL,
+    filename        TEXT,
+    format          TEXT,
+    rows            INTEGER,
+    events          INTEGER,
+    sessions        INTEGER,
+    runs            INTEGER,
+    players_created INTEGER,
+    activities      INTEGER,
+    mapping         TEXT,   -- the confirmed column mapping, as JSON
+    actor_mode      TEXT,
+    date_from       TEXT,
+    date_to         TEXT,
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_imports_game ON imports(game_id);
+`);
+
+// Migration: existing DBs pre-date the import-batch columns. The tables above are
+// only created IF NOT EXISTS, so add the columns in place when they're missing
+// (idempotent, runs on every boot). Native game rows keep import_id = NULL.
+function ensureColumn(table, col, decl) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!cols.some((c) => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${decl}`);
+}
+ensureColumn("events", "import_id", "INTEGER");
+ensureColumn("scores", "import_id", "INTEGER");
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_events_import ON events(import_id);
+  CREATE INDEX IF NOT EXISTS idx_scores_import ON scores(import_id);
 `);
 
 module.exports = db;

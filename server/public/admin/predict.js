@@ -89,7 +89,12 @@
 
     if (data.error === "not_enough_data") {
       var haveTxt = data.totalRuns ? " (have " + fmt(data.totalRuns) + " runs" + (data.usableRuns != null ? ", " + fmt(data.usableRuns) + " with behaviour features" : "") + "; need ≥ 12)" : "";
-      container.innerHTML = html + truncWarn + '<div class="empty">Not enough runs to train a model' + haveTxt + '.<br><span class="small">Widen the date range, clear the player filter, or enable more feature groups.</span></div>';
+      // Zero runs usually means an imported game with no per-run outcome. Point
+      // the user at the fix rather than the generic filter advice.
+      var hint = data.totalRuns
+        ? "Widen the date range, clear the player filter, or enable more feature groups."
+        : "This game has no runs to learn from. If you imported it, re-import mapping a <b>Score</b> or <b>Stars</b> column as the outcome — or pick the <b>Session length</b> target above, which needs only sessions.";
+      container.innerHTML = html + truncWarn + '<div class="empty">Not enough runs to train a model' + haveTxt + '.<br><span class="small">' + hint + '</span></div>';
       wireControls(container, data, ctx, st);
       return;
     }
