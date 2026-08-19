@@ -106,7 +106,7 @@ const norm = (h) => String(h).toLowerCase().replace(/[^a-z0-9]/g, "");
 const ROLE_HINTS = {
   session: ["caseid", "case", "sessionid", "session", "traceid", "trace", "attemptid", "attempt", "playid", "visitid", "sessionuuid"],
   activity: ["activity", "activityname", "action", "eventtype", "event", "type", "task", "step", "state", "concept:name", "conceptname"],
-  timestamp: ["timestamp", "time:timestamp", "timetimestamp", "datetime", "iso", "time", "ts", "date", "when", "starttime", "startdate", "createdat"],
+  timestamp: ["timestamp", "time:timestamp", "timetimestamp", "datetime", "occurredat", "occurred", "eventtime", "recordedat", "loggedat", "logged", "createdat", "completetime", "starttime", "startdate", "iso", "time", "ts", "date", "when"],
   actor: ["userid", "user", "studentid", "student", "playerid", "player", "resource", "actor", "subject", "participant", "learner", "org:resource"],
   seq: ["seq", "sequence", "order", "orderindex", "index", "position", "eventnr", "eventno", "step", "nr"],
 };
