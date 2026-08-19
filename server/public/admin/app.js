@@ -788,64 +788,112 @@
         .catch(function (e) { $("#impErr").textContent = e.message; });
     }
 
-    function roleSelect(cols, mapping, role, label, hint) {
-      var opts = '<option value="">— none —</option>' + cols.map(function (c) {
-        return '<option value="' + esc(c) + '"' + (mapping[role] === c ? " selected" : "") + ">" + esc(c) + "</option>";
-      }).join("");
-      return '<label class="imp-role"><span class="k">' + esc(label) + '</span>' +
-        '<select data-role="' + role + '">' + opts + "</select>" +
-        '<span class="muted small">' + esc(hint) + "</span></label>";
-    }
-
-    function previewTable(a) {
-      var cols = a.headers, rows = a.sample || [];
-      var head = "<tr>" + cols.map(function (c) { return "<th>" + esc(c) + "</th>"; }).join("") + "</tr>";
-      var body = rows.map(function (r) {
-        return "<tr>" + cols.map(function (c) { var val = r[c]; if (val && typeof val === "object") val = JSON.stringify(val); return "<td>" + esc(trunc(val, 40)) + "</td>"; }).join("") + "</tr>";
-      }).join("");
-      return '<div class="tbl-wrap imp-prev"><table><thead>' + head + "</thead><tbody>" + body + "</tbody></table></div>";
-    }
+    var ROLES = [
+      { key: "session", label: "Case / session", req: true },
+      { key: "activity", label: "Activity / event", req: true },
+      { key: "timestamp", label: "Timestamp", req: false },
+      { key: "actor", label: "Actor / user", req: false },
+      { key: "seq", label: "Sequence order", req: false },
+    ];
 
     function suggestGame() {
       var s = String(st.filename || "import").replace(/\.[^.]+$/, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
       return s || "imported";
     }
 
+    // Which target role a source column is currently assigned to (or "none").
+    function roleForCol(mapping, col) { for (var i = 0; i < ROLES.length; i++) if (mapping[ROLES[i].key] === col) return ROLES[i].key; return "none"; }
+
+    function colValues(a, col) {
+      return (a.sample || []).map(function (r) { var val = r[col]; if (val && typeof val === "object") val = JSON.stringify(val); return val == null ? "" : String(val); }).filter(function (val) { return val.trim() !== ""; });
+    }
+    // A light type hint for each column (badge only; the import handles any type).
+    // Date detection requires a real date-ish shape, not just a lenient
+    // Date.parse (which accepts things like "sess-1").
+    function looksDate(val) {
+      val = val.trim();
+      if (/^-?\d+(\.\d+)?$/.test(val)) return false;               // pure number, not a date
+      if (!/(\d{4}-\d{2}-\d{2})|(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})|(\d{1,2}:\d{2})/.test(val)) return false;
+      return !isNaN(Date.parse(val));
+    }
+    function inferType(a, col) {
+      var vals = colValues(a, col); if (!vals.length) return "empty";
+      if (vals.every(function (val) { return /^-?\d+(\.\d+)?$/.test(val.trim()); })) return "number";
+      if (vals.every(function (val) { return looksDate(val); })) return "date";
+      return "text";
+    }
+    function sampleChips(a, col) {
+      var vals = colValues(a, col), seen = {}, out = [];
+      for (var i = 0; i < vals.length && out.length < 3; i++) { if (!seen[vals[i]]) { seen[vals[i]] = 1; out.push(vals[i]); } }
+      if (!out.length) return '<span class="muted small">empty</span>';
+      return out.map(function (x) { return '<span class="imp-cv">' + esc(trunc(x, 26)) + "</span>"; }).join("");
+    }
+
     function renderMapping(a) {
-      var cols = a.headers;
       var badge = a.isLudixExport ? '<span class="pill">Ludix export</span>' : '<span class="pill">' + esc(String(a.format).toUpperCase()) + "</span>";
       var warn = (a.warnings || []).map(function (w) { return '<div class="imp-warn">' + esc(w) + "</div>"; }).join("");
+      var roleOpts = function (selRole) {
+        return '<option value="none">— ignore —</option>' + ROLES.map(function (R) {
+          return '<option value="' + R.key + '"' + (selRole === R.key ? " selected" : "") + ">" + esc(R.label) + "</option>";
+        }).join("");
+      };
+      var rows = a.headers.map(function (c) {
+        var role = roleForCol(a.mapping, c), ty = inferType(a, c);
+        return '<tr data-col="' + esc(c) + '">' +
+          '<td class="imp-cname"><b>' + esc(c) + "</b></td>" +
+          '<td><span class="t-badge t-' + ty + '">' + ty + "</span></td>" +
+          '<td class="imp-samp">' + sampleChips(a, c) + "</td>" +
+          '<td><select class="imp-rolesel" data-col="' + esc(c) + '">' + roleOpts(role) + "</select></td></tr>";
+      }).join("");
+
       $("#impResult").innerHTML =
-        '<div class="card"><div class="card-head"><h3>Map columns</h3>' + badge + ' <span class="pill">' + fmt(a.rowCount) + " rows</span></div>" +
-        '<p class="cap">Confirm which column is which. Case and Activity are required; a timestamp adds date filters and session durations.</p>' + warn +
-        '<div class="imp-map">' +
-        roleSelect(cols, a.mapping, "session", "Case / session", "one play-through or trace") +
-        roleSelect(cols, a.mapping, "activity", "Activity / event", "the step name (network nodes)") +
-        roleSelect(cols, a.mapping, "timestamp", "Timestamp", "optional; enables time views") +
-        roleSelect(cols, a.mapping, "actor", "Actor / user", "optional; becomes the player") +
-        roleSelect(cols, a.mapping, "seq", "Sequence order", "optional; overrides timestamp order") +
-        "</div>" +
+        '<div class="card"><div class="card-head"><h3>Map your columns</h3>' + badge + ' <span class="pill">' + fmt(a.rowCount) + " rows</span></div>" +
+        '<p class="cap">Assign each column in your file to a target field. <b>Case</b> and <b>Activity</b> are required; a <b>timestamp</b> adds date filters and session durations. We auto-detected the mapping below — adjust anything that looks off.</p>' + warn +
+        '<div class="imp-status" id="impStatus"></div>' +
+        '<div class="tbl-wrap"><table class="imp-cols"><thead><tr><th>Your column</th><th>Type</th><th>Sample values</th><th>Maps to</th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
         '<div class="imp-actor" id="impActorRow"><span class="k">With no actor column, use</span>' +
         '<label><input type="radio" name="impActor" value="session" checked> one player per case</label>' +
         '<label><input type="radio" name="impActor" value="single"> a single "imported" player</label></div>' +
-        '<h4 style="margin:14px 0 6px">Preview</h4>' + previewTable(a) +
-        '<div class="toolbar" style="margin-top:14px;align-items:flex-end">' +
+        '<div class="toolbar" style="margin-top:16px;align-items:flex-end">' +
         '<label class="imp-role" style="max-width:220px"><span class="k">Import into game</span><input id="impGame" placeholder="e.g. my-study" value="' + esc(suggestGame()) + '"></label>' +
         '<button class="btn primary sm" id="impGo">Import</button><span class="muted small" id="impExisting"></span></div>' +
         '<div class="err" id="impGoErr"></div></div>';
 
-      function actorSel() { return $("#impResult").querySelector('select[data-role="actor"]'); }
-      function syncActorRow() { var on = !!actorSel().value; $("#impActorRow").style.opacity = on ? ".45" : ""; [].forEach.call($("#impActorRow").querySelectorAll("input"), function (i) { i.disabled = on; }); }
-      actorSel().addEventListener("change", syncActorRow); syncActorRow();
-
+      var sels = $("#impResult").querySelectorAll("select.imp-rolesel");
+      [].forEach.call(sels, function (s) {
+        s.addEventListener("change", function () {
+          // a role maps to exactly one column: clear it from any other select
+          if (this.value !== "none") [].forEach.call(sels, function (o) { if (o !== s && o.value === s.value) o.value = "none"; });
+          updateStatus();
+        });
+      });
       var gi = $("#impGame");
       gi.addEventListener("blur", checkExisting); checkExisting();
       $("#impGo").addEventListener("click", doCommit);
+      updateStatus();
+    }
+
+    // Live required-field status + row highlight + import-button gating.
+    function updateStatus() {
+      var m = currentMapping();
+      $("#impStatus").innerHTML = ROLES.map(function (R) {
+        var col = m[R.key], cls = col ? "ok" : (R.req ? "req" : "opt");
+        return '<span class="imp-chip ' + cls + '"><i></i>' + esc(R.label) + ": <b>" + (col ? esc(col) : (R.req ? "required" : "not set")) + "</b></span>";
+      }).join("");
+      [].forEach.call($("#impResult").querySelectorAll("tr[data-col]"), function (tr) {
+        var s = tr.querySelector("select.imp-rolesel");
+        tr.className = s && s.value !== "none" ? "mapped" : "";
+      });
+      var actorRow = $("#impActorRow"), hasActor = !!m.actor;
+      if (actorRow) { actorRow.style.opacity = hasActor ? ".4" : ""; [].forEach.call(actorRow.querySelectorAll("input"), function (i) { i.disabled = hasActor; }); }
+      var go = $("#impGo"); if (go) go.disabled = !m.activity;
     }
 
     function currentMapping() {
-      var m = {};
-      [].forEach.call($("#impResult").querySelectorAll("select[data-role]"), function (s) { m[s.getAttribute("data-role")] = s.value || null; });
+      var m = { session: null, activity: null, timestamp: null, actor: null, seq: null };
+      [].forEach.call($("#impResult").querySelectorAll("select.imp-rolesel"), function (s) {
+        var role = s.value; if (role && role !== "none") m[role] = s.getAttribute("data-col");
+      });
       return m;
     }
     function currentActorMode() {
