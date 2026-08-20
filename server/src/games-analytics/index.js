@@ -8,10 +8,11 @@
  * ========================================================================== */
 "use strict";
 
-// No game-specific analytics modules are registered by default. Add one like:
-//   "my-game": require("./my-game"),
-// and a matching renderer in public/admin/games/my-game.js.
-const modules = {};
+// Register a game's analytics module here, and add a matching renderer in
+// public/admin/games/<game>.js (loaded from public/admin/index.html).
+const modules = {
+  "quick-tap": require("./quick-tap"),
+};
 
 module.exports = {
   get: (gameId) => modules[gameId] || null,

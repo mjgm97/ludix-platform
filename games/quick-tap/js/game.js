@@ -14,8 +14,9 @@
   "use strict";
 
   var ROUND_MS = 20000;         // a round lasts 20 seconds
+  var TARGET_MS = 1400;         // a target expires (times out) if not tapped in time
   var els = {};
-  var state = null;             // { score, spawnAt, timerId, endAt } while playing
+  var state = null;             // { score, hits, spawnAt, endAt, tx, ty, expireId } while playing
 
   document.addEventListener("DOMContentLoaded", function () {
     els.root = document.getElementById("game");
@@ -31,7 +32,20 @@
     els.score = document.getElementById("score");
     els.time = document.getElementById("time");
     document.getElementById("play").addEventListener("click", start);
+    // One handler on the whole stage: a tap on the target is a HIT, a tap on
+    // empty space is a MISS. Both stream their position (normalised 0..1) so the
+    // dashboard can build a click heatmap and accuracy analytics.
+    els.stage.addEventListener("pointerdown", onStageTap);
   });
+
+  // Normalise a pointer event to the stage as {x, y} in 0..1 (rounded).
+  function tapPos(e) {
+    var r = els.stage.getBoundingClientRect();
+    return {
+      x: Math.round(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * 1000) / 1000,
+      y: Math.round(Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) * 1000) / 1000,
+    };
+  }
 
   function start() {
     // Ensure the player has a suite identity before we begin (shows the modal
@@ -59,6 +73,7 @@
     if (!state) return;
     var old = els.stage.querySelector(".target");
     if (old) old.remove();
+    if (state.expireId) clearTimeout(state.expireId);
     var r = 34;
     var w = els.stage.clientWidth, h = els.stage.clientHeight;
     var x = r + Math.random() * (w - 2 * r);
@@ -68,25 +83,42 @@
     t.style.left = x + "px";
     t.style.top = y + "px";
     state.spawnAt = performance.now();
-    t.addEventListener("pointerdown", onHit);
+    // Remember the target centre (normalised) so a hit reports where it was.
+    state.tx = Math.round(((x + r) / w) * 1000) / 1000;
+    state.ty = Math.round(((y + r) / h) * 1000) / 1000;
     els.stage.appendChild(t);
+    // If it isn't tapped in time it "expires" — an error the dashboard tracks.
+    state.expireId = setTimeout(onExpire, TARGET_MS);
   }
 
-  function onHit(e) {
+  function onStageTap(e) {
     if (!state) return;
     e.preventDefault();
-    var reaction = Math.round(performance.now() - state.spawnAt);
-    state.score += 1;
-    state.hits += 1;
-    els.score.textContent = state.score;
-    // One analytics event per hit — appears live in the dashboard's event feed.
-    Suite.event("hit", { reaction_ms: reaction, n: state.score });
+    if (e.target && e.target.classList && e.target.classList.contains("target")) {
+      var reaction = Math.round(performance.now() - state.spawnAt);
+      state.score += 1;
+      state.hits += 1;
+      els.score.textContent = state.score;
+      // One analytics event per hit — appears live in the dashboard's event feed.
+      Suite.event("hit", { x: state.tx, y: state.ty, reaction_ms: reaction, n: state.score });
+      spawnTarget();
+    } else {
+      // Tapped empty space — a miss. Report where the tap landed.
+      var m = tapPos(e);
+      Suite.event("miss", { x: m.x, y: m.y });
+    }
+  }
+
+  function onExpire() {
+    if (!state) return;
+    Suite.event("expire", { x: state.tx, y: state.ty });
     spawnTarget();
   }
 
   function end() {
     if (!state) return;
     var score = state.score, hits = state.hits;
+    if (state.expireId) clearTimeout(state.expireId);
     state = null;
     var t = els.stage.querySelector(".target");
     if (t) t.remove();

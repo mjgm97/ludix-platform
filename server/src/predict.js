@@ -38,6 +38,10 @@ const TOPK_TYPES = 12;           // event types used for the "event mix" feature
 // whole timing group (it's the label source), handled in buildDesign().
 const GROUPS = ["volume", "timing", "structure", "eventmix", "context"];
 const TARGETS = ["score", "stars", "sessionLen", "pass"];
+// Model families the user can pick. All stay exactly SHAP-explainable: the tree
+// families reuse TreeSHAP; the linear family uses exact linear SHAP. Downstream
+// (importance / beeswarm / waterfall / diagnostics) is identical for all.
+const ALGORITHMS = ["gbtree", "forest", "tree", "linear"];
 
 // ---- Data: one behaviour row per run ----------------------------------------
 // Pulls each run (score row with a session) plus a folded summary of its event
@@ -171,16 +175,21 @@ function buildDesign(data, target, groups, threshold) {
 // squared-error regression (g=F−y, h=1) and logistic classification
 // (g=p−y, h=p(1−p)). Trees are shallow CART; every node stores its training
 // `cover` (row count), which path-dependent TreeSHAP needs.
-function buildTree(X, idx, g, h, depth, maxDepth, minLeaf, lambda) {
+// `feats` optionally restricts which feature columns this tree may split on
+// (the random forest passes a per-tree subspace); omit ⇒ all features. Split
+// feature indices stay in the FULL feature space, so TreeSHAP over nFeat is
+// unaffected (unused features simply get φ = 0).
+function buildTree(X, idx, g, h, depth, maxDepth, minLeaf, lambda, feats) {
   let G = 0, H = 0; for (const i of idx) { G += g[i]; H += h[i]; }
   const leafVal = -G / (H + lambda);
   const node = { leaf: true, value: leafVal, cover: idx.length };
   if (depth >= maxDepth || idx.length < 2 * minLeaf) return node;
 
-  const nFeat = X[0].length;
+  const F = feats || null, nFeat = X[0].length, nF = F ? F.length : nFeat;
   let best = null;
   const parentScore = (G * G) / (H + lambda);
-  for (let f = 0; f < nFeat; f++) {
+  for (let fi = 0; fi < nF; fi++) {
+    const f = F ? F[fi] : fi;
     // Sort this node's rows by feature f, sweep split points accumulating G/H.
     const ord = idx.slice().sort((a, b) => X[a][f] - X[b][f]);
     let GL = 0, HL = 0;
@@ -201,8 +210,8 @@ function buildTree(X, idx, g, h, depth, maxDepth, minLeaf, lambda) {
   const leftIdx = best.ord.slice(0, best.split), rightIdx = best.ord.slice(best.split);
   return {
     leaf: false, feature: best.feature, threshold: best.threshold, cover: idx.length,
-    left: buildTree(X, leftIdx, g, h, depth + 1, maxDepth, minLeaf, lambda),
-    right: buildTree(X, rightIdx, g, h, depth + 1, maxDepth, minLeaf, lambda),
+    left: buildTree(X, leftIdx, g, h, depth + 1, maxDepth, minLeaf, lambda, feats),
+    right: buildTree(X, rightIdx, g, h, depth + 1, maxDepth, minLeaf, lambda, feats),
   };
 }
 function treePredict(node, x) {
@@ -227,10 +236,82 @@ function trainGBM(X, y, opts) {
     for (let i = 0; i < n; i++) F[i] += lr * treePredict(tree, X[i]);
     trees.push(tree);
   }
-  return { F0, lr, trees, classify };
+  return { kind: "gbtree", F0, lr, trees, classify, probSpace: false };
 }
-function marginOf(model, x) { let m = model.F0; for (const t of model.trees) m += model.lr * treePredict(t, x); return m; }
-function predictOf(model, x) { const m = marginOf(model, x); return model.classify ? sigmoid(m) : m; }
+
+// ---- Random forest + single decision tree (reuse buildTree/TreeSHAP) --------
+// CART leaves are fit with g=−y, h=1, so leafVal = Σy/(n+λ) ≈ the leaf mean of y
+// — a plain regression tree. For a 0/1 label that mean IS the leaf's positive
+// RATE, i.e. a probability, so tree/forest classification lives in probability
+// space (probSpace: true ⇒ no sigmoid). The additive ensemble F0 + Σ lr·tree
+// keeps the TreeSHAP identity (baseValue + Σφ == margin) for free.
+function fitCartTree(X, y, idx, maxDepth) {
+  const n = idx.length, lambda = 1e-6, minLeaf = Math.max(3, Math.round(n * 0.02));
+  const g = new Float64Array(X.length), h = new Float64Array(X.length);
+  for (const i of idx) { g[i] = -y[i]; h[i] = 1; }
+  const featSub = arguments.length > 4 && arguments[4] ? arguments[4] : null;
+  return buildTree(X, idx, g, h, 0, maxDepth, minLeaf, lambda, featSub);
+}
+function trainForest(X, y, opts) {
+  const n = X.length, nFeat = X[0].length, nTrees = opts.estimators;
+  const rand = U.rng((opts.seed ^ 0x9e3779b9) >>> 0);
+  const k = Math.max(1, Math.round(Math.sqrt(nFeat)));
+  const trees = [];
+  for (let t = 0; t < nTrees; t++) {
+    const idx = new Array(n); for (let i = 0; i < n; i++) idx[i] = (rand() * n) | 0;   // bootstrap
+    // per-tree random feature subspace
+    const pool = Array.from({ length: nFeat }, (_, i) => i);
+    for (let i = pool.length - 1; i > 0; i--) { const j = (rand() * (i + 1)) | 0; const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp; }
+    const feats = pool.slice(0, k);
+    trees.push(fitCartTree(X, y, idx, opts.maxDepth, feats));
+  }
+  return { kind: "forest", F0: 0, lr: 1 / nTrees, trees, classify: opts.classify, probSpace: true };
+}
+function trainTree(X, y, opts) {
+  const idx = Array.from({ length: X.length }, (_, i) => i);
+  const tree = fitCartTree(X, y, idx, opts.maxDepth);
+  return { kind: "tree", F0: 0, lr: 1, trees: [tree], classify: opts.classify, probSpace: true };
+}
+
+// ---- Linear / logistic regression (ridge, exact linear SHAP) ----------------
+// Fit on standardized features (mean 0, std 1) by gradient descent. Because the
+// training mean of each standardized feature is 0, the exact SHAP decomposition
+// is φ_j = w_j·z_j(x) and baseValue = intercept — no sampling needed.
+function trainLinear(X, y, opts) {
+  const n = X.length, d = X[0].length, classify = opts.classify;
+  const mean = new Float64Array(d), std = new Float64Array(d);
+  for (let j = 0; j < d; j++) { let s = 0; for (let i = 0; i < n; i++) s += X[i][j]; mean[j] = s / n; }
+  for (let j = 0; j < d; j++) { let v = 0; for (let i = 0; i < n; i++) { const e = X[i][j] - mean[j]; v += e * e; } std[j] = Math.sqrt(v / n) || 1; }
+  const z = X.map((row) => { const r = new Float64Array(d); for (let j = 0; j < d; j++) r[j] = (row[j] - mean[j]) / std[j]; return r; });
+  const w = new Float64Array(d); let b = classify ? 0 : y.reduce((a, v) => a + v, 0) / n;
+  const l2 = opts.l2, lr = classify ? 0.5 : 0.1, iters = opts.iters || 400;
+  for (let it = 0; it < iters; it++) {
+    const gw = new Float64Array(d); let gb = 0;
+    for (let i = 0; i < n; i++) {
+      let m = b; for (let j = 0; j < d; j++) m += w[j] * z[i][j];
+      const pred = classify ? sigmoid(m) : m, err = pred - y[i];
+      gb += err; for (let j = 0; j < d; j++) gw[j] += err * z[i][j];
+    }
+    b -= lr * gb / n;
+    for (let j = 0; j < d; j++) w[j] -= lr * (gw[j] / n + l2 * w[j]);
+  }
+  return { kind: "linear", w: Array.from(w), b, mean: Array.from(mean), std: Array.from(std), classify, probSpace: false };
+}
+function linMargin(model, x) { let m = model.b; for (let j = 0; j < model.w.length; j++) m += model.w[j] * (x[j] - model.mean[j]) / model.std[j]; return m; }
+function linShap(model, x, nFeat) { const phi = new Float64Array(nFeat); for (let j = 0; j < model.w.length; j++) phi[j] = model.w[j] * (x[j] - model.mean[j]) / model.std[j]; return phi; }
+
+// ---- Uniform model interface (dispatch tree families vs linear) -------------
+function trainModel(algorithm, X, y, opts) {
+  if (algorithm === "forest") return trainForest(X, y, opts);
+  if (algorithm === "tree") return trainTree(X, y, opts);
+  if (algorithm === "linear") return trainLinear(X, y, opts);
+  return trainGBM(X, y, opts);
+}
+function marginOf(model, x) {
+  if (model.kind === "linear") return linMargin(model, x);
+  let m = model.F0; for (const t of model.trees) m += model.lr * treePredict(t, x); return m;
+}
+function predictOf(model, x) { const m = marginOf(model, x); if (model.probSpace) return m; return model.classify ? sigmoid(m) : m; }
 
 // ---- Exact path-dependent TreeSHAP ------------------------------------------
 // Lundberg et al., "Consistent Individualized Feature Attribution for Tree
@@ -311,7 +392,9 @@ function treeMean(node) {
 }
 
 // φ for the whole ensemble at one instance (scaled by lr, summed across trees).
+// Linear models decompose exactly, without TreeSHAP.
 function shapValues(model, x, nFeat) {
+  if (model.kind === "linear") return linShap(model, x, nFeat);
   const phi = new Float64Array(nFeat);
   for (const t of model.trees) {
     const p = new Float64Array(nFeat);
@@ -320,7 +403,10 @@ function shapValues(model, x, nFeat) {
   }
   return phi;
 }
-function shapBase(model) { let b = model.F0; for (const t of model.trees) b += model.lr * treeMean(t); return b; }
+function shapBase(model) {
+  if (model.kind === "linear") return model.b;   // E[margin] at the feature means = intercept
+  let b = model.F0; for (const t of model.trees) b += model.lr * treeMean(t); return b;
+}
 
 // ---- Metrics ----------------------------------------------------------------
 function regressionMetrics(yTrue, yPred) {
@@ -369,9 +455,14 @@ function compute(gameId, query) {
   const groups = (query.features ? String(query.features).split(",") : GROUPS).filter((g) => GROUPS.indexOf(g) >= 0);
   const enabled = groups.length ? groups : GROUPS.slice();
   const seed = Number.isFinite(parseInt(query.seed, 10)) ? parseInt(query.seed, 10) : 42;
+  const algorithm = ALGORITHMS.indexOf(query.algorithm) >= 0 ? query.algorithm : "gbtree";
   const estimators = Math.max(20, Math.min(400, parseInt(query.estimators, 10) || 150));
   const learningRate = (function () { const v = parseFloat(query.learningRate); return v > 0 && v <= 1 ? v : 0.1; })();
-  const maxDepth = Math.max(1, Math.min(6, parseInt(query.maxDepth, 10) || 3));
+  // A single tree wants more depth than a boosted stump; forests sit in between.
+  const depthCap = algorithm === "tree" ? 10 : 6;
+  const depthDefault = algorithm === "tree" ? 6 : algorithm === "forest" ? 5 : 3;
+  const maxDepth = Math.max(1, Math.min(depthCap, parseInt(query.maxDepth, 10) || depthDefault));
+  const l2 = (function () { const v = parseFloat(query.l2); return v >= 0 && v <= 100 ? v : 0.1; })();
 
   const availableFrom = (data) => {
     // A target is only trainable if it VARIES (≥2 distinct non-null values).
@@ -407,7 +498,7 @@ function compute(gameId, query) {
   const Xtr = pick(trIdx, design.X), ytr = pick(trIdx, design.y);
   const Xte = pick(teIdx, design.X), yte = pick(teIdx, design.y);
 
-  const model = trainGBM(Xtr, ytr, { estimators, learningRate, maxDepth, classify });
+  const model = trainModel(algorithm, Xtr, ytr, { estimators, learningRate, maxDepth, classify, seed, l2 });
 
   // Holdout metrics vs a constant baseline (train mean / positive rate).
   let metrics, baseline;
@@ -445,7 +536,7 @@ function compute(gameId, query) {
     return {
       username: design.meta[i].username, level: design.meta[i].level,
       actual: U.round(design.meta[i].actual, 5),
-      predicted: U.round(classify ? sigmoid(margin) : margin, 5),
+      predicted: U.round(predictOf(model, x), 5),
       margin: U.round(margin, 5),
       values: Array.from(x, (v) => U.round(v, 5)),
       phi: Array.from(phi, (v) => U.round(v, 5)),
@@ -465,10 +556,11 @@ function compute(gameId, query) {
 
   return {
     gameId, target, classify, threshold, availableTargets,
+    algorithm, availableAlgorithms: ALGORITHMS.slice(),
     features: enabled, featNames: design.featNames, groupOf: design.groupOf,
     baseValue: U.round(baseValue, 5),
-    baseProb: classify ? U.round(sigmoid(baseValue), 5) : null,
-    model: { estimators, learningRate, maxDepth, seed },
+    baseProb: classify ? U.round(model.probSpace ? baseValue : sigmoid(baseValue), 5) : null,
+    model: { algorithm, estimators, learningRate, maxDepth, seed, l2 },
     metrics, baseline,
     importance, beeswarm, instances, exemplars,
     meta: {
@@ -480,4 +572,4 @@ function compute(gameId, query) {
   };
 }
 
-module.exports = { compute, GROUPS, TARGETS };
+module.exports = { compute, GROUPS, TARGETS, ALGORITHMS };
