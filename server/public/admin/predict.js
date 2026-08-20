@@ -25,6 +25,15 @@
     ["context", "Context", "level & player history"],
   ];
   var TARGETS = [["score", "Score"], ["stars", "Stars"], ["sessionLen", "Session length"], ["pass", "Pass / fail"]];
+  // [id, label, hyperparameters it uses] — drives the selector and which inputs show.
+  var ALGS = [
+    ["gbtree", "Gradient boosting", ["trees", "lr", "depth"]],
+    ["forest", "Random forest", ["trees", "depth"]],
+    ["tree", "Decision tree", ["depth"]],
+    ["linear", "Linear / logistic", ["l2"]],
+  ];
+  function algLabel(id) { for (var i = 0; i < ALGS.length; i++) if (ALGS[i][0] === id) return ALGS[i][1]; return id; }
+  function algUses(id, hp) { for (var i = 0; i < ALGS.length; i++) if (ALGS[i][0] === id) return ALGS[i][2].indexOf(hp) >= 0; return false; }
 
   // Diverging colour for the beeswarm: low feature value → blue, high → red.
   function lowHigh(t) {
@@ -54,12 +63,17 @@
     }
 
     // ---- Controls -----------------------------------------------------------
+    var curAlg = data.algorithm || "gbtree";
     var html = "";
     html += '<div class="card tna-controls">';
     html += '<div class="tna-ctl"><label>Target</label><div class="seg sm" id="pTarget">' +
       TARGETS.map(function (t) {
         var ok = data.availableTargets ? data.availableTargets[t[0]] : true;
         return '<button class="chip' + (data.target === t[0] ? " active" : "") + '"' + (ok ? "" : " disabled title=\"no data for this target\"") + ' data-t="' + t[0] + '">' + esc(t[1]) + "</button>";
+      }).join("") + "</div></div>";
+    html += '<div class="tna-ctl"><label>Algorithm</label><div class="seg sm" id="pAlgo">' +
+      ALGS.map(function (a) {
+        return '<button class="chip' + (curAlg === a[0] ? " active" : "") + '" data-a="' + a[0] + '">' + esc(a[1]) + "</button>";
       }).join("") + "</div></div>";
     html += '<div class="tna-ctl" id="pThrCtl" style="' + (data.classify ? "" : "display:none") + '"><label>Pass threshold <b id="pThrVal">' + pct(data.threshold) + '</b></label>' +
       '<input type="range" id="pThr" min="0.1" max="0.9" step="0.05" value="' + data.threshold + '"></div>';
@@ -71,12 +85,14 @@
       }).join("") + "</div></div>";
     html += "</div>";
 
-    // ---- Model hyperparameters + train -------------------------------------
-    var mdl = data.model || { estimators: 150, learningRate: 0.1, maxDepth: 3 };
-    html += '<div class="card tna-controls" style="margin-top:-6px">' +
-      '<div class="tna-ctl"><label>Trees</label><input type="number" id="pEst" min="20" max="400" step="10" value="' + mdl.estimators + '" style="width:84px"></div>' +
-      '<div class="tna-ctl"><label>Learning rate</label><input type="number" id="pLr" min="0.01" max="1" step="0.01" value="' + mdl.learningRate + '" style="width:84px"></div>' +
-      '<div class="tna-ctl"><label>Max depth</label><input type="number" id="pDepth" min="1" max="6" step="1" value="' + mdl.maxDepth + '" style="width:84px"></div>' +
+    // ---- Model hyperparameters + train (only those the algorithm uses) ------
+    var mdl = data.model || { estimators: 150, learningRate: 0.1, maxDepth: 3, l2: 0.1 };
+    var hp = "";
+    if (algUses(curAlg, "trees")) hp += '<div class="tna-ctl"><label>Trees</label><input type="number" id="pEst" min="20" max="400" step="10" value="' + mdl.estimators + '" style="width:84px"></div>';
+    if (algUses(curAlg, "lr")) hp += '<div class="tna-ctl"><label>Learning rate</label><input type="number" id="pLr" min="0.01" max="1" step="0.01" value="' + mdl.learningRate + '" style="width:84px"></div>';
+    if (algUses(curAlg, "depth")) hp += '<div class="tna-ctl"><label>Max depth</label><input type="number" id="pDepth" min="1" max="' + (curAlg === "tree" ? 10 : 6) + '" step="1" value="' + mdl.maxDepth + '" style="width:84px"></div>';
+    if (algUses(curAlg, "l2")) hp += '<div class="tna-ctl"><label>L2 strength</label><input type="number" id="pL2" min="0" max="10" step="0.05" value="' + (mdl.l2 == null ? 0.1 : mdl.l2) + '" style="width:84px"></div>';
+    html += '<div class="card tna-controls" style="margin-top:-6px">' + hp +
       '<div class="tna-ctl push"><label>&nbsp;</label><button class="btn sm" id="pTrain">Retrain</button></div>' +
       "</div>";
 
@@ -118,10 +134,17 @@
     }
     html += "</div>";
 
+    // Model summary — only the hyperparameters this algorithm actually used.
+    var parts = [algLabel(curAlg)];
+    if (algUses(curAlg, "trees")) parts.push(fmt(mdl.estimators) + " trees");
+    if (algUses(curAlg, "depth")) parts.push("depth " + mdl.maxDepth);
+    if (algUses(curAlg, "lr")) parts.push("lr " + mdl.learningRate);
+    if (algUses(curAlg, "l2")) parts.push("L2 " + (mdl.l2 == null ? 0.1 : mdl.l2));
+    var shapKind = curAlg === "linear" ? "exact linear SHAP" : "TreeSHAP";
     html += '<div class="card" style="padding:11px 16px"><span class="small muted">' +
-      'Gradient-boosted trees · ' + fmt(mdl.estimators) + ' trees · depth ' + mdl.maxDepth + ' · lr ' + mdl.learningRate +
+      esc(parts.join(" · ")) +
       ' · trained on ' + fmt(meta.trainN) + ', tested on ' + fmt(meta.testN) + (meta.sampledFrom ? " (sampled from " + fmt(meta.sampledFrom) + ")" : "") +
-      ' · explaining ' + fmt(data.instances.length) + ' runs with SHAP.</span></div>';
+      ' · explaining ' + fmt(data.instances.length) + ' runs with ' + shapKind + '.</span></div>';
 
     html += truncWarn;
 
@@ -340,6 +363,10 @@
     if (tSeg) [].forEach.call(tSeg.querySelectorAll("[data-t]"), function (b) {
       b.addEventListener("click", function () { if (b.disabled || b.getAttribute("data-t") === data.target) return; ctx.reload({ target: b.getAttribute("data-t") }); });
     });
+    var aSeg = container.querySelector("#pAlgo");
+    if (aSeg) [].forEach.call(aSeg.querySelectorAll("[data-a]"), function (b) {
+      b.addEventListener("click", function () { if (b.getAttribute("data-a") === (data.algorithm || "gbtree")) return; ctx.reload({ algorithm: b.getAttribute("data-a") }); });
+    });
     var thr = container.querySelector("#pThr");
     if (thr) thr.addEventListener("change", function () { ctx.reload({ threshold: parseFloat(thr.value) }); });
     var grp = container.querySelector("#pGroups");
@@ -353,11 +380,14 @@
     });
     var train = container.querySelector("#pTrain");
     if (train) train.addEventListener("click", function () {
-      ctx.reload({
-        estimators: parseInt(container.querySelector("#pEst").value, 10) || 150,
-        learningRate: parseFloat(container.querySelector("#pLr").value) || 0.1,
-        maxDepth: parseInt(container.querySelector("#pDepth").value, 10) || 3,
-      });
+      // Only send hyperparameters this algorithm exposes (the others aren't rendered).
+      var patch = {}, est = container.querySelector("#pEst"), lr = container.querySelector("#pLr"),
+        depth = container.querySelector("#pDepth"), l2 = container.querySelector("#pL2");
+      if (est) patch.estimators = parseInt(est.value, 10) || 150;
+      if (lr) patch.learningRate = parseFloat(lr.value) || 0.1;
+      if (depth) patch.maxDepth = parseInt(depth.value, 10) || 3;
+      if (l2) patch.l2 = isNaN(parseFloat(l2.value)) ? 0.1 : parseFloat(l2.value);
+      ctx.reload(patch);
     });
   }
 

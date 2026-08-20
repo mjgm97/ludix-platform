@@ -176,6 +176,112 @@ function mount(router) {
     res.json({ gameId, series: merged });
   });
 
+  // ---- Research analytics (game-agnostic, learning-analytics oriented) -------
+  // Four metrics serious-games research cares about, all derived from the generic
+  // event+score envelope: a LEARNING CURVE (do players improve with practice), an
+  // EFFORT–PERFORMANCE relationship (does time-on-task relate to achievement), a
+  // RETENTION survival curve, and an ENGAGEMENT distribution (Gini + Lorenz).
+  router.get("/games/:gameId/research", (req, res) => {
+    const gameId = String(req.params.gameId);
+    const P = Object.assign({ g: gameId }, U.filterParams(req.query));
+    const eW = U.whereFor("e", req.query);
+    const sW = U.whereFor("s", req.query);
+    const eJ = U.joinFor("e", req.query);
+    const sJ = U.joinFor("s", req.query);
+
+    // 1) Learning curve: mean score by per-player attempt index. Only attempts
+    // with enough players to be meaningful, capped so the x-axis stays readable.
+    const LC_MAX_ATTEMPTS = 20, LC_MIN_N = 3;
+    const learningRows = db.prepare(
+      `SELECT attempt, AVG(score) AS avg, AVG(stars) AS avgStars, COUNT(*) AS n
+         FROM (SELECT s.score AS score, s.stars AS stars,
+                      ROW_NUMBER() OVER (PARTITION BY s.player_id ORDER BY s.created_at, s.id) AS attempt
+                 FROM scores s${sJ} WHERE s.game_id=@g AND s.session_id IS NOT NULL${sW})
+        WHERE attempt <= @lcMax GROUP BY attempt HAVING n >= @lcMin ORDER BY attempt`
+    ).all(Object.assign({ lcMax: LC_MAX_ATTEMPTS, lcMin: LC_MIN_N }, P));
+    const learningCurve = learningRows.map((r) => ({
+      attempt: r.attempt, avg: U.round(r.avg, 4), avgStars: U.round(r.avgStars, 3), n: r.n,
+    }));
+
+    // 2) Effort vs performance: one point per run (session duration + event count
+    // vs score). Bounded read; Pearson r computed over what we read.
+    const EFFORT_CAP = 4000;
+    const effortRows = db.prepare(
+      `SELECT s.score AS score, ev.n AS events, ev.dur AS durMin
+         FROM scores s${sJ}
+         JOIN (SELECT e.session_id AS sid, COUNT(*) AS n,
+                      MAX(0, MAX(e.t_ms) - MIN(e.t_ms)) / 60000.0 AS dur
+                 FROM events e${eJ} WHERE e.game_id=@g${eW} GROUP BY e.session_id) ev
+           ON ev.sid = s.session_id
+        WHERE s.game_id=@g AND s.session_id IS NOT NULL${sW}
+        LIMIT @cap`
+    ).all(Object.assign({ cap: EFFORT_CAP }, P));
+    const pearson = (xs, ys) => {
+      const n = xs.length; if (n < 3) return null;
+      let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+      for (let i = 0; i < n; i++) { const x = xs[i], y = ys[i]; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; }
+      const cov = sxy - sx * sy / n, vx = sxx - sx * sx / n, vy = syy - sy * sy / n;
+      return vx > 0 && vy > 0 ? U.round(cov / Math.sqrt(vx * vy), 4) : null;
+    };
+    const durs = effortRows.map((r) => r.durMin), evs = effortRows.map((r) => r.events), scs = effortRows.map((r) => r.score);
+    const effort = {
+      n: effortRows.length,
+      rDurationScore: pearson(durs, scs),
+      rEventsScore: pearson(evs, scs),
+      scatter: effortRows.slice(0, 400).map((r) => ({ durMin: U.round(r.durMin, 3), events: r.events, score: U.round(r.score, 4) })),
+    };
+
+    // 3) Retention (survival) curve: per player, the max day-offset between first
+    // and last active day; R(d) = fraction still returning ≥ d days after first.
+    const spanRows = db.prepare(
+      `SELECT CAST(julianday(MAX(date(e.created_at))) - julianday(MIN(date(e.created_at))) AS INT) AS maxoff
+         FROM events e${eJ} WHERE e.game_id=@g${eW} GROUP BY e.player_id`
+    ).all(P);
+    const totalPlayers = spanRows.length;
+    let maxDay = 0; spanRows.forEach((r) => { if (r.maxoff > maxDay) maxDay = r.maxoff; });
+    maxDay = Math.min(maxDay, 60);
+    const atLeast = new Array(maxDay + 2).fill(0);
+    spanRows.forEach((r) => { const d = Math.max(0, Math.min(maxDay + 1, r.maxoff)); atLeast[d]++; });
+    // suffix sum: players with lifespan ≥ d
+    for (let d = maxDay; d >= 0; d--) atLeast[d] += atLeast[d + 1];
+    const retention = totalPlayers
+      ? Array.from({ length: maxDay + 1 }, (_, d) => ({ day: d, retained: U.round(atLeast[d] / totalPlayers, 4) }))
+      : [];
+
+    // 4) Engagement distribution: per-player event counts → Gini + Lorenz curve.
+    const perPlayer = db.prepare(
+      `SELECT COUNT(*) AS n FROM events e${eJ} WHERE e.game_id=@g${eW} GROUP BY e.player_id`
+    ).all(P).map((r) => r.n).sort((a, b) => a - b);
+    let gini = null, lorenz = [];
+    if (perPlayer.length) {
+      const N = perPlayer.length, total = perPlayer.reduce((a, v) => a + v, 0);
+      if (total > 0) {
+        // Gini via the ordered-values formula: (2·Σ i·x_i)/(N·Σx) − (N+1)/N.
+        let wsum = 0; for (let i = 0; i < N; i++) wsum += (i + 1) * perPlayer[i];
+        gini = U.round((2 * wsum) / (N * total) - (N + 1) / N, 4);
+        // Downsampled Lorenz curve: cumulative share of events vs share of players.
+        const STEPS = Math.min(100, N);
+        lorenz = [{ p: 0, cum: 0 }];
+        let cum = 0, idx = 0;
+        for (let s = 1; s <= STEPS; s++) {
+          const upto = Math.round((s / STEPS) * N);
+          while (idx < upto) { cum += perPlayer[idx]; idx++; }
+          lorenz.push({ p: U.round(upto / N, 4), cum: U.round(cum / total, 4) });
+        }
+      }
+    }
+
+    res.json({
+      gameId,
+      meta: {
+        hasScores: learningCurve.length > 0 || effort.n > 0,
+        players: totalPlayers, runs: effort.n,
+      },
+      learningCurve, effort, retention,
+      engagement: { gini, lorenz, players: perPlayer.length },
+    });
+  });
+
   // ---- Process / sequence mining (game-agnostic) ----------------------------
   // Derives process-mining artefacts from the raw event stream: trace variants
   // (the distinct paths sessions take), a directly-follows graph, start/end

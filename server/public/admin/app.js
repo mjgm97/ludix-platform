@@ -229,6 +229,94 @@
     }).join("") + "</div>";
   }
 
+  // ---- Research charts: numeric-axis line + XY scatter + Lorenz curve -------
+  // Hand-rolled inline SVG like the charts above; these take numeric x (attempt,
+  // day, share) instead of day-strings, and add a mean/reference line.
+  function xyLine(points, opts) {
+    opts = opts || {};
+    return chart(function (host) {
+      var W = 740, H = opts.h || 210, pad = { l: 46, r: 14, t: 14, b: 30 };
+      var plot = document.createElement("div"); host.appendChild(plot);
+      var tip = document.createElement("div"); tip.className = "chart-tip"; tip.style.display = "none"; host.appendChild(tip);
+      if (!points.length) { plot.innerHTML = emptyBox(H); return; }
+      var col = opts.color || COL.gold, vfmt = opts.yfmt || fmt, xfmt = opts.xfmt || function (v) { return String(v); };
+      var xs = points.map(function (p) { return p.x; }), ys = points.map(function (p) { return p.y; });
+      var xmin = Math.min.apply(null, xs), xmax = Math.max.apply(null, xs);
+      var ymax = opts.ymax != null ? opts.ymax : niceMax(Math.max.apply(null, ys) || 1), ymin = opts.ymin != null ? opts.ymin : 0;
+      var n = points.length;
+      var X = function (v) { return pad.l + (W - pad.l - pad.r) * (xmax === xmin ? 0.5 : (v - xmin) / (xmax - xmin)); };
+      var Y = function (v) { return H - pad.b - (H - pad.t - pad.b) * ((v - ymin) / (ymax - ymin || 1)); };
+      var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" class="ichart">';
+      for (var g = 0; g <= 4; g++) { var gv = ymin + (ymax - ymin) * g / 4, gy = Y(gv); s += '<line x1="' + pad.l + '" y1="' + gy + '" x2="' + (W - pad.r) + '" y2="' + gy + '" stroke="' + COL.line + '" opacity=".5"/><text x="' + (pad.l - 6) + '" y="' + (gy + 3) + '" fill="' + COL.muted + '" font-size="10" text-anchor="end">' + esc(vfmt(gv)) + "</text>"; }
+      if (opts.mean != null) { var my = Y(opts.mean); s += '<line x1="' + pad.l + '" y1="' + my.toFixed(1) + '" x2="' + (W - pad.r) + '" y2="' + my.toFixed(1) + '" stroke="' + COL.muted + '" stroke-dasharray="4 4" opacity=".6"/>'; }
+      var d = points.map(function (p, i) { return (i ? "L" : "M") + X(p.x).toFixed(1) + " " + Y(p.y).toFixed(1); }).join(" ");
+      if (opts.area) { s += '<path d="' + d + " L" + X(points[n - 1].x).toFixed(1) + " " + Y(ymin).toFixed(1) + " L" + X(points[0].x).toFixed(1) + " " + Y(ymin).toFixed(1) + ' Z" fill="' + col + '" opacity="0.10"/>'; }
+      s += '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round" class="cline"/>';
+      points.forEach(function (p) { s += '<circle class="xyd" data-x="' + p.x + '" cx="' + X(p.x).toFixed(1) + '" cy="' + Y(p.y).toFixed(1) + '" r="3.6" fill="' + col + '" stroke="#0b1120" stroke-width="1.4"/>'; });
+      var ticks = points.filter(function (_, i) { return n <= 12 || i % Math.ceil(n / 12) === 0 || i === n - 1; });
+      ticks.forEach(function (p) { s += '<text x="' + X(p.x).toFixed(1) + '" y="' + (H - 10) + '" fill="' + COL.muted + '" font-size="10" text-anchor="middle">' + esc(xfmt(p.x)) + "</text>"; });
+      if (opts.xlabel) s += '<text x="' + ((pad.l + W - pad.r) / 2) + '" y="' + (H - 0.5) + '" fill="' + COL.muted + '" font-size="10" text-anchor="middle">' + esc(opts.xlabel) + "</text>";
+      s += "</svg>"; plot.innerHTML = s;
+      var svg = plot.querySelector("svg");
+      [].forEach.call(svg.querySelectorAll(".xyd"), function (dot) {
+        var p = points[[].indexOf.call(svg.querySelectorAll(".xyd"), dot)];
+        dot.addEventListener("mousemove", function (e) { tip.innerHTML = '<div class="small muted">' + esc((opts.xlabel || "x") + " " + xfmt(p.x)) + '</div><div class="r"><i style="background:' + col + '"></i>' + esc(opts.ylabel || "y") + ": <b>" + vfmt(p.y) + "</b>" + (p.n != null ? ' <span class="muted">(n=' + p.n + ")</span>" : "") + "</div>"; tip.style.display = "block"; positionTip(tip, host, e); });
+        dot.addEventListener("mouseleave", function () { tip.style.display = "none"; });
+      });
+    });
+  }
+  function scatterXY(points, opts) {
+    opts = opts || {};
+    return chart(function (host) {
+      var W = 740, H = opts.h || 260, pad = { l: 48, r: 14, t: 14, b: 34 };
+      var plot = document.createElement("div"); host.appendChild(plot);
+      var tip = document.createElement("div"); tip.className = "chart-tip"; tip.style.display = "none"; host.appendChild(tip);
+      if (!points.length) { plot.innerHTML = emptyBox(H); return; }
+      var col = opts.color || COL.blue, xfmt = opts.xfmt || dec, yfmt = opts.yfmt || dec;
+      var xs = points.map(function (p) { return p.x; }), ys = points.map(function (p) { return p.y; });
+      var xmin = Math.min.apply(null, xs), xmax = Math.max.apply(null, xs), ymin = Math.min.apply(null, ys), ymax = Math.max.apply(null, ys);
+      if (xmax === xmin) xmax = xmin + 1; if (ymax === ymin) ymax = ymin + 1;
+      var X = function (v) { return pad.l + (W - pad.l - pad.r) * (v - xmin) / (xmax - xmin); };
+      var Y = function (v) { return H - pad.b - (H - pad.t - pad.b) * (v - ymin) / (ymax - ymin); };
+      var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" class="ichart">';
+      for (var g = 0; g <= 4; g++) { var gy = pad.t + (H - pad.t - pad.b) * g / 4, gv = ymax - (ymax - ymin) * g / 4; s += '<line x1="' + pad.l + '" y1="' + gy.toFixed(1) + '" x2="' + (W - pad.r) + '" y2="' + gy.toFixed(1) + '" stroke="' + COL.line + '" opacity=".5"/><text x="' + (pad.l - 6) + '" y="' + (gy + 3).toFixed(1) + '" fill="' + COL.muted + '" font-size="10" text-anchor="end">' + esc(yfmt(gv)) + "</text>"; }
+      // least-squares trend line
+      if (opts.trend !== false) {
+        var n = points.length, sx = 0, sy = 0, sxx = 0, sxy = 0; points.forEach(function (p) { sx += p.x; sy += p.y; sxx += p.x * p.x; sxy += p.x * p.y; });
+        var den = n * sxx - sx * sx; if (den !== 0) { var b1 = (n * sxy - sx * sy) / den, b0 = (sy - b1 * sx) / n; s += '<line x1="' + X(xmin).toFixed(1) + '" y1="' + Y(b0 + b1 * xmin).toFixed(1) + '" x2="' + X(xmax).toFixed(1) + '" y2="' + Y(b0 + b1 * xmax).toFixed(1) + '" stroke="' + COL.gold + '" stroke-width="2" opacity="0.85"/>'; }
+      }
+      points.forEach(function (p, i) { s += '<circle class="scd" data-i="' + i + '" cx="' + X(p.x).toFixed(1) + '" cy="' + Y(p.y).toFixed(1) + '" r="3.1" fill="' + col + '" opacity="0.62"/>'; });
+      s += '<text x="' + ((pad.l + W - pad.r) / 2) + '" y="' + (H - 4) + '" fill="' + COL.muted + '" font-size="10" text-anchor="middle">' + esc(opts.xlabel || "x") + " →</text>";
+      s += '<text x="12" y="' + ((pad.t + H - pad.b) / 2) + '" fill="' + COL.muted + '" font-size="10" text-anchor="middle" transform="rotate(-90 12 ' + ((pad.t + H - pad.b) / 2) + ')">' + esc(opts.ylabel || "y") + " →</text>";
+      s += "</svg>"; plot.innerHTML = s;
+      var svg = plot.querySelector("svg");
+      [].forEach.call(svg.querySelectorAll(".scd"), function (dot) {
+        var p = points[+dot.getAttribute("data-i")];
+        dot.addEventListener("mousemove", function (e) { tip.innerHTML = '<div class="r">' + esc(opts.xlabel || "x") + ": <b>" + xfmt(p.x) + "</b></div><div class=\"r\">" + esc(opts.ylabel || "y") + ": <b>" + yfmt(p.y) + "</b></div>"; tip.style.display = "block"; positionTip(tip, host, e); });
+        dot.addEventListener("mouseleave", function () { tip.style.display = "none"; });
+      });
+    });
+  }
+  function lorenzChart(lorenz) {
+    return chart(function (host) {
+      var S = 260, pad = 34;
+      var plot = document.createElement("div"); host.appendChild(plot);
+      var tip = document.createElement("div"); tip.className = "chart-tip"; tip.style.display = "none"; host.appendChild(tip);
+      if (!lorenz || !lorenz.length) { plot.innerHTML = emptyBox(S); return; }
+      host.style.maxWidth = "320px";
+      var X = function (v) { return pad + v * (S - pad - 10); }, Y = function (v) { return (S - pad) - v * (S - pad - 10); };
+      var s = '<svg viewBox="0 0 ' + S + ' ' + S + '" class="ichart">';
+      s += '<line x1="' + pad + '" y1="' + (S - pad) + '" x2="' + (S - 10) + '" y2="' + (S - pad) + '" stroke="' + COL.line + '"/><line x1="' + pad + '" y1="' + (S - pad) + '" x2="' + pad + '" y2="10" stroke="' + COL.line + '"/>';
+      s += '<line x1="' + X(0) + '" y1="' + Y(0) + '" x2="' + X(1) + '" y2="' + Y(1) + '" stroke="' + COL.muted + '" stroke-dasharray="4 4" opacity=".6"/>';
+      var d = lorenz.map(function (p, i) { return (i ? "L" : "M") + X(p.p).toFixed(1) + " " + Y(p.cum).toFixed(1); }).join(" ");
+      s += '<path d="' + d + " L" + X(1).toFixed(1) + " " + Y(0).toFixed(1) + ' Z" fill="' + COL.purple + '" opacity="0.12"/>';
+      s += '<path d="' + d + '" fill="none" stroke="' + COL.purple + '" stroke-width="2.4"/>';
+      s += '<text x="' + (S / 2) + '" y="' + (S - 6) + '" fill="' + COL.muted + '" font-size="10" text-anchor="middle">share of players →</text>';
+      s += '<text x="12" y="' + (S / 2) + '" fill="' + COL.muted + '" font-size="10" text-anchor="middle" transform="rotate(-90 12 ' + (S / 2) + ')">share of events →</text>';
+      s += "</svg>"; plot.innerHTML = s;
+    });
+  }
+
   // =========================================================================
   // AUTH
   // =========================================================================
@@ -311,6 +399,26 @@
     btn.addEventListener("click", function (e) { e.stopPropagation(); (menu.classList.contains("open") ? close : open)(); });
     document.addEventListener("keydown", function (e) { if (e.key === "Escape") close(); });
     return { refresh: paint };
+  }
+
+  // Re-fetch the game list and refresh the game selector in place (used after an
+  // import/delete so a new or emptied game shows up without a page reload). When
+  // `preferGameId` is given and present, it becomes the active game.
+  function syncGames(preferGameId, cb) {
+    return api("/overview").then(function (d) {
+      state.games = d.games || [];
+      var sel = $("#fGame");
+      if (sel) sel.innerHTML = state.games.length
+        ? state.games.map(function (g) { return '<option value="' + esc(g.gameId) + '">' + esc(g.gameId) + "</option>"; }).join("")
+        : '<option value="">(no games yet)</option>';
+      var has = function (id) { return state.games.some(function (g) { return g.gameId === id; }); };
+      if (preferGameId && has(preferGameId)) state.gameId = preferGameId;
+      else if (!has(state.gameId)) state.gameId = state.games.length ? state.games[0].gameId : null;
+      if (sel && state.gameId) sel.value = state.gameId;
+      if (gameDD) gameDD.refresh();
+      loadUsers();
+      if (cb) cb();
+    }).catch(function () {});
   }
 
   function loadUsers() {
@@ -437,8 +545,8 @@
   // ---- General (game-agnostic) dashboard ------------------------------------
   function renderGeneral(v) {
     var g = encodeURIComponent(state.gameId);
-    Promise.all([api("/games/" + g + "/summary" + filterQS()), api("/games/" + g + "/timeseries" + filterQS())]).then(function (res) {
-      var s = res[0], ts = res[1].series, T = s.tiles;
+    Promise.all([api("/games/" + g + "/summary" + filterQS()), api("/games/" + g + "/timeseries" + filterQS()), api("/games/" + g + "/research" + filterQS())]).then(function (res) {
+      var s = res[0], ts = res[1].series, R = res[2], T = s.tiles;
       var html = '<div class="tiles">' +
         tile("Players", fmt(T.players)) + tile("Sessions", fmt(T.sessions)) + tile("Events", fmt(T.events)) + tile("Runs", fmt(T.runs)) +
         tile("Avg session", T.avgSessionMin == null ? "—" : T.avgSessionMin + "<small> min</small>") +
@@ -468,10 +576,64 @@
         hBars(s.topPlayers.map(function (p) { return { label: p.username, value: p.events, color: COL.blue }; }), { labelW: 130 }));
       html += "</div>";
 
-      html += card("Event volume by type", "Every event type this game emits.", hBars(s.eventTypes.map(function (e) { return { label: e.type, value: e.count, color: COL.blue }; }), { labelW: 160 }));
+      html += renderResearch(R);
       v.innerHTML = html;
       flushCharts();
     }).catch(errBox(v));
+  }
+
+  // ---- Research analytics (learning-analytics oriented, game-agnostic) -------
+  function renderResearch(R) {
+    R = R || {};
+    var lc = R.learningCurve || [], ef = R.effort || {}, ret = R.retention || [], en = R.engagement || {};
+    var needScore = '<p class="muted small">Needs per-run score data. Import a <b>Score</b>/<b>Stars</b> column, or use a game that records scores.</p>';
+    var html = '<div class="section-head"><h2>Research analytics</h2><span class="small muted">Learning-analytics metrics derived from the generic event + score log — useful across serious games.</span></div>';
+    // Scores are game-specific (0–1, 0–100, points…), so format numerically rather
+    // than as a percentage. Compact: integers plain, small values to 2 decimals.
+    var numFmt = function (v) { return v == null ? "—" : (Math.abs(v) >= 10 ? fmt(Math.round(v)) : dec(v, 2)); };
+
+    // Learning curve
+    var lcBody = lc.length
+      ? xyLine(lc.map(function (r) { return { x: r.attempt, y: r.avg, n: r.n }; }),
+          { color: COL.gold, area: true, ymin: 0, yfmt: numFmt, xfmt: function (v) { return String(v); }, xlabel: "attempt", ylabel: "mean score" })
+      : needScore;
+    html += card("Learning curve", "Mean score by attempt number (a player's 1st, 2nd, 3rd… run). Rising = players improve with practice. Only attempts with ≥3 players shown.", lcBody);
+
+    // Effort vs performance
+    html += '<div class="grid2">';
+    var efBody;
+    if (ef.n && ef.scatter && ef.scatter.length) {
+      efBody = '<div class="tiles" style="margin-bottom:10px">' +
+        tile("r (duration→score)", ef.rDurationScore == null ? "—" : dec(ef.rDurationScore, 2)) +
+        tile("r (events→score)", ef.rEventsScore == null ? "—" : dec(ef.rEventsScore, 2)) +
+        tile("Runs", fmt(ef.n)) + "</div>" +
+        scatterXY(ef.scatter.map(function (p) { return { x: p.durMin, y: p.score }; }),
+          { color: COL.blue, xlabel: "session minutes", ylabel: "score", yfmt: numFmt, xfmt: function (v) { return dec(v, 1); } });
+    } else efBody = needScore;
+    html += card("Effort vs performance", "Does time-on-task relate to achievement? Each dot is a run: session length vs score, with a trend line and Pearson r.", efBody);
+
+    // Retention (survival)
+    var retBody = ret.length
+      ? xyLine(ret.map(function (r) { return { x: r.day, y: r.retained }; }),
+          { color: COL.green, area: true, ymin: 0, ymax: 1, yfmt: function (v) { return pct(v, 0); }, xfmt: function (v) { return String(v) + "d"; }, xlabel: "days after first play", ylabel: "still returning" })
+      : '<p class="muted small">No player activity in range.</p>';
+    html += card("Player retention", "Share of players who keep returning at least N days after their first play — a survival curve for engagement.", retBody);
+    html += "</div>";
+
+    // Engagement distribution (Lorenz + Gini)
+    var enBody;
+    if (en.lorenz && en.lorenz.length) {
+      var giniPct = en.gini == null ? null : Math.round(en.gini * 100);
+      enBody = '<div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center">' +
+        '<div style="flex:0 0 auto">' + lorenzChart(en.lorenz) + "</div>" +
+        '<div style="flex:1 1 200px">' +
+        '<div class="tiles">' + tile("Gini", en.gini == null ? "—" : dec(en.gini, 2)) + tile("Players", fmt(en.players)) + "</div>" +
+        '<p class="muted small" style="margin-top:8px">Gini 0 = every player contributes equally; 1 = a single player accounts for all activity.' +
+        (giniPct != null ? " Here the most active players drive a disproportionate share of events." : "") + "</p></div></div>";
+    } else enBody = '<p class="muted small">No player activity in range.</p>';
+    html += card("Engagement distribution", "How evenly participation is spread across players (Lorenz curve + Gini). The further the curve bows below the diagonal, the more a few players dominate.", enBody);
+
+    return html;
   }
 
   // ---- Process / sequence mining -------------------------------------------
@@ -600,12 +762,12 @@
   // Like TNA, view-local state survives the module's local redraws and the
   // server retrains (target / features / hyperparameters are server-computed).
   // Resets when you switch games so stale settings don't leak across games.
-  var predictState = { game: null, target: "score", threshold: 0.6, features: null, estimators: 150, learningRate: 0.1, maxDepth: 3, seed: 42 };
+  var predictState = { game: null, target: "score", threshold: 0.6, features: null, algorithm: "gbtree", estimators: 150, learningRate: 0.1, maxDepth: 3, l2: 0.1, seed: 42 };
   function renderPredict(v) {
     if (predictState.game !== state.gameId) {
       predictState.game = state.gameId;
       predictState.target = "score"; predictState.threshold = 0.6; predictState.features = null;
-      predictState.estimators = 150; predictState.learningRate = 0.1; predictState.maxDepth = 3;
+      predictState.algorithm = "gbtree"; predictState.estimators = 150; predictState.learningRate = 0.1; predictState.maxDepth = 3; predictState.l2 = 0.1;
     }
     if (!window.SuitePredict) { v.innerHTML = '<div class="empty">Prediction module not loaded.</div>'; return; }
     var g = encodeURIComponent(state.gameId);
@@ -613,7 +775,8 @@
       from: state.from, to: state.to, user: state.player,
       target: predictState.target, threshold: predictState.threshold,
       features: predictState.features ? predictState.features.join(",") : null,
-      estimators: predictState.estimators, learningRate: predictState.learningRate, maxDepth: predictState.maxDepth, seed: predictState.seed,
+      algorithm: predictState.algorithm,
+      estimators: predictState.estimators, learningRate: predictState.learningRate, maxDepth: predictState.maxDepth, l2: predictState.l2, seed: predictState.seed,
     });
     v.innerHTML = '<div class="spin">Training model & computing SHAP…</div>';
     api("/games/" + g + "/predict" + q).then(function (d) {
@@ -621,7 +784,14 @@
       if (d.features) predictState.features = d.features.slice();
       window.SuitePredict.render(v, d, {
         dash: SuiteDash, state: predictState,
-        reload: function (patch) { Object.assign(predictState, patch); renderPredict(v); },
+        reload: function (patch) {
+          // Switching algorithm clears the tuning knobs so the server's
+          // per-algorithm defaults apply (qs omits null values).
+          if (patch.algorithm && patch.algorithm !== predictState.algorithm) {
+            patch.estimators = null; patch.learningRate = null; patch.maxDepth = null; patch.l2 = null;
+          }
+          Object.assign(predictState, patch); renderPredict(v);
+        },
       });
     }).catch(errBox(v));
   }
@@ -1003,16 +1173,10 @@
         '<div class="toolbar" style="margin-top:12px"><button class="btn primary sm" id="impOpen">Open the ' + esc(s.gameId) + ' dashboard</button>' +
         '<button class="btn ghost sm" id="impAgain">Import another file</button></div></div>';
       loadImports();
-      $("#impOpen").addEventListener("click", function () {
-        api("/overview").then(function (d) {
-          state.games = d.games;
-          var sel = $("#fGame");
-          sel.innerHTML = d.games.map(function (g) { return '<option value="' + esc(g.gameId) + '">' + esc(g.gameId) + "</option>"; }).join("");
-          sel.value = s.gameId; state.gameId = s.gameId;
-          if (gameDD) gameDD.refresh();
-          loadUsers(); gotoTab("general");
-        });
-      });
+      // Make the imported game usable immediately: refresh the game selector and
+      // make it the active game — no page reload needed.
+      syncGames(s.gameId);
+      $("#impOpen").addEventListener("click", function () { syncGames(s.gameId, function () { gotoTab("general"); }); });
       $("#impAgain").addEventListener("click", function () { renderImport(v); });
     }
 
@@ -1051,14 +1215,7 @@
       del("/imports/" + encodeURIComponent(id))
         .then(function () {
           loadImports();
-          // Refresh the game list/overview so an emptied game drops out of filters.
-          api("/overview").then(function (d) {
-            state.games = d.games;
-            var sel = $("#fGame");
-            sel.innerHTML = d.games.length ? d.games.map(function (g) { return '<option value="' + esc(g.gameId) + '">' + esc(g.gameId) + "</option>"; }).join("") : '<option value="">(no games yet)</option>';
-            if (!d.games.some(function (g) { return g.gameId === state.gameId; })) state.gameId = d.games.length ? d.games[0].gameId : null;
-            if (gameDD) gameDD.refresh();
-          }).catch(function () {});
+          syncGames();   // an emptied game drops out of the selector without a reload
         })
         .catch(function (e) { btn.disabled = false; btn.textContent = "Delete"; if (derr) derr.textContent = e.message; });
     }
