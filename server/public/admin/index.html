@@ -388,6 +388,20 @@
      wider than the card, and centres it when it fits. */
   .tna-svg-wrap{width:100%;overflow-x:auto}
   .tna-pyr-svg{display:block;margin:0 auto}
+  /* chart export control (added around every chart svg by export.js) */
+  .exp-wrap{position:relative}
+  .exp-ctrl{position:absolute;top:8px;right:8px;z-index:6}
+  .exp-btn{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;border:1px solid var(--line);
+    background:rgba(13,20,36,.7);color:var(--muted2);backdrop-filter:blur(6px);opacity:.28;transition:opacity .15s,color .15s,border-color .15s}
+  .exp-wrap:hover .exp-btn,.exp-ctrl.open .exp-btn{opacity:1}
+  .exp-btn:hover,.exp-ctrl.open .exp-btn{color:var(--ink);border-color:var(--green)}
+  .exp-menu{display:none;position:absolute;top:36px;right:0;min-width:172px;background:var(--panel2);
+    border:1px solid var(--line);border-radius:11px;padding:6px;box-shadow:var(--sh);}
+  .exp-ctrl.open .exp-menu{display:block}
+  .exp-menu-lbl{font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted2);padding:6px 9px 3px}
+  .exp-menu button{display:block;width:100%;text-align:left;background:none;border:0;color:var(--ink);
+    padding:7px 9px;border-radius:8px;font:600 12.5px/1.2 inherit;font-variant-numeric:tabular-nums}
+  .exp-menu button:hover{background:var(--elev)}
   .tna-svg text{font-family:inherit}
   .tna-svg .tna-nlabel{fill:var(--ink);font-size:12px;font-weight:800;paint-order:stroke;stroke:#0a1020;stroke-width:3.4px;stroke-linejoin:round}
   .tna-svg .tna-elabel{fill:var(--ink);font-size:11.5px;font-weight:800;font-variant-numeric:tabular-nums;paint-order:stroke;stroke:#0a1020;stroke-width:3px;stroke-linejoin:round}
@@ -697,6 +711,9 @@
 
   <div id="modalRoot"></div>
 
+  <!-- Chart export (SVG/PNG). Self-initialises: observes #view and adds a
+       download control to every chart svg, current and future. -->
+  <script src="export.js"></script>
   <script src="app.js"></script>
   <!-- Transition Network Analysis renderer (Network tab). Registers
        window.SuiteTNA; app.js fetches /tna and hands it the data. -->
