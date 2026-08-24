@@ -420,15 +420,22 @@
   .tna-cluster{margin-bottom:0}
   .tna-cluster-top{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 8px;min-height:22px}
   .tna-cnet{margin-bottom:10px}
+  /* cluster tile: one header line, network sits on the card (no inner box) */
+  .tna-cl-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:0 0 10px}
+  .tna-cl-head b{font-size:15px;color:var(--ink);font-weight:800}
+  .tna-cl-meta{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+  .tna-cluster-net{position:relative;margin-bottom:12px}
   /* cliques: one flat tile each (network + a single caption line), same modest
      size regardless of count — no nested card/header/pill chrome */
-  .tna-clique-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,280px));gap:14px;justify-content:start}
+  .tna-clique-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,290px));gap:14px;justify-content:center}
   .tna-clique{margin:0;background:radial-gradient(130% 130% at 50% 0%,#0e1830,#0a1120);border:1px solid var(--line);border-radius:14px;padding:6px 6px 0;overflow:hidden}
   .tna-cq-net{position:relative}
   .tna-cq-cap{display:flex;align-items:baseline;gap:9px;padding:5px 8px 9px;font-size:12px}
   .tna-cq-cap b{color:var(--ink);font-weight:800}
   .tna-cq-cap span{color:var(--muted);font-variant-numeric:tabular-nums}
-  .tna-cseq-label{font-size:10.5px;color:var(--muted);font-weight:800;letter-spacing:.06em;text-transform:uppercase;margin:0 0 5px}
+  .tna-cseq-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 5px}
+  .tna-cseq-label{font-size:10.5px;color:var(--muted);font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+  .tna-seqtog{padding:3px 10px;font-size:11px}
 
   /* ---- Prediction (SHAP) ---- */
   .seg .chip[disabled]{opacity:.32;cursor:not-allowed}
