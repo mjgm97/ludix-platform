@@ -31,6 +31,25 @@
     function pretty(t) { return String(t).replace(/[_\-]+/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); }); }
     function chip(id, sm) { var c = colorOf[id] || COL.muted; return '<span class="tna-chip' + (sm ? " sm" : "") + '" style="background:' + c + ';color:' + ink(c) + '">' + esc(pretty(id)) + "</span>"; }
 
+    // Shared bits for the graph/table views below.
+    var EDGE_POS = "#3fa86a", EDGE_NEG = "#d0544e";   // signed diff edge colours (over/under in cohort A)
+    var STAB_COLORS = ["#5aa9ff", "#ff6b6b", "#4ad6a0", "#ffd54a", "#b18aff"];   // stability line per measure
+    function stabColor(measures, m) { var i = measures.indexOf(m); return STAB_COLORS[(i < 0 ? 0 : i) % STAB_COLORS.length]; }
+    function starOf(p) { return p == null ? "" : (p <= 0.001 ? "***" : p <= 0.01 ? "**" : p <= 0.05 ? "*" : ""); }
+    function fmtSigned(v, d) { var neg = v < 0; return (neg ? "-" : "") + Math.abs(v).toFixed(d).replace(/^0(?=\.)/, ""); }
+    // A little Graph|Table segmented control (wired by wireViewToggle).
+    function viewSeg(active) { return '<div class="seg sm tna-viewseg"><button class="chip' + (active !== "table" ? " active" : "") + '" data-view="graph">Graph</button><button class="chip' + (active === "table" ? " active" : "") + '" data-view="table">Table</button></div>'; }
+    function wireViewToggle(root, cur, onChange) {
+      var seg = root.querySelector(".tna-viewseg"); if (!seg) return;
+      [].forEach.call(seg.querySelectorAll("[data-view]"), function (b) {
+        b.addEventListener("click", function () {
+          var v = b.getAttribute("data-view"); if (v === cur()) return;
+          [].forEach.call(seg.querySelectorAll("[data-view]"), function (x) { x.classList.toggle("active", x === b); });
+          onChange(v);
+        });
+      });
+    }
+
     if (!data.stats.sessions || !data.nodes.length) {
       container.innerHTML = '<div class="empty">No sessions in this range to build a transition network.<br><span class="small">TNA needs event sequences — widen the date range or clear the player filter.</span></div>';
       return;
@@ -47,9 +66,9 @@
     html += '<div class="tna-ctl"><label>Min transition probability <b id="tnaThrVal">' + pct(st.minWeight || 0) + '</b></label>' +
       '<input type="range" id="tnaThr" min="0" max="0.9" step="0.02" value="' + (st.minWeight || 0) + '"></div>';
     html += '<div class="tna-ctl"><label>Edge labels</label><label class="tna-switch"><input type="checkbox" id="tnaLabels"' + (st.labels ? " checked" : "") + '><span>Show</span></label></div>';
-    html += '<div class="tna-ctl push"><label>Validation</label><div class="tna-valctl">' +
-      '<input type="number" id="tnaIter" min="50" max="2000" step="50" value="' + (st.iter || 300) + '" title="bootstrap iterations">' +
-      '<button class="btn sm' + (st.bootstrap ? " ghost" : "") + '" id="tnaBoot">' + (st.bootstrap ? "Re-run bootstrap" : "Run bootstrap") + '</button></div></div>';
+    html += '<div class="tna-ctl push"><label>Validation &amp; diagnostics</label><div class="tna-valctl">' +
+      '<input type="number" id="tnaIter" min="50" max="2000" step="50" value="' + (st.iter || 300) + '" title="resampling iterations">' +
+      '<button class="btn sm' + (st.bootstrap ? " ghost" : "") + '" id="tnaBoot" title="Bootstrap edge stability + Markov-order test + case-drop centrality stability">' + (st.bootstrap ? "Re-run" : "Run validation") + '</button></div></div>';
     html += "</div>";
 
     // ---- Tiles --------------------------------------------------------------
@@ -67,6 +86,10 @@
     html += '<div class="card"><h3>Transition network</h3><p class="cap">Nodes are activities; the ring around a node is the share of sessions that <em>start</em> there. A directed edge A→B is the probability of going to B right after A (thickness ∝ weight). Drag nodes to rearrange; hover one to isolate its transitions.</p>' +
       '<div id="tnaNet"></div></div>';
 
+    // ---- Validation & diagnostics (bootstrap · Markov order · stability) -----
+    // Sits directly under the network it validates.
+    html += '<div id="tnaValidation">' + diagnosticsHTML(data) + "</div>";
+
     // ---- Activity frequency (descriptives) ---------------------------------
     html += '<div class="card"><div class="card-head"><h3>Activity frequency</h3><span class="pill">' + data.nodes.length + ' activities</span></div>' +
       '<p class="cap">How often each activity occurs across every session in range. Colours match the network nodes.</p>' +
@@ -81,6 +104,29 @@
       D.hBars(data.initial.map(function (r) { return { label: pretty(r.state), value: Math.round(r.probability * 1000) / 10, color: colorOf[r.state] }; }), { labelW: 150 }));
     html += "</div>";
 
+    // ---- Centrality comparison (bar chart, one measure at a time) ------------
+    // Complements the table: pick a single ladyna centrality measure and compare
+    // it across every state as ranked bars (colours match the network).
+    var CENT_MEASURES = [
+      ["outStrength", "Out-strength", 2], ["inStrength", "In-strength", 2],
+      ["betweenness", "Betweenness", 2], ["betweennessRSP", "Betweenness (RSP)", 2],
+      ["closeness", "Closeness", 3], ["closenessIn", "Closeness (in)", 3], ["closenessOut", "Closeness (out)", 3],
+      ["pageRank", "PageRank", 3], ["diffusion", "Diffusion", 2], ["clustering", "Clustering", 3],
+    ];
+    var centMeasureOpts = CENT_MEASURES.map(function (m) { return '<option value="' + m[0] + '"' + (m[0] === (st.centMeasure || "betweenness") ? " selected" : "") + ">" + esc(m[1]) + "</option>"; }).join("");
+    html += '<div class="card"><div class="card-head"><h3>Centrality comparison</h3>' +
+      '<span class="spacer"></span><label class="small muted" style="display:flex;align-items:center;gap:8px">Measure' +
+      '<select id="tnaCentMeasure">' + centMeasureOpts + "</select></label></div>" +
+      '<p class="cap">The selected centrality measure across every state, ranked — a direct side-by-side comparison to complement the table above. Colours match the network; hover a bar to isolate that activity’s transitions.</p>' +
+      '<div id="tnaCentBars"></div></div>';
+
+    // ---- Communities --------------------------------------------------------
+    if (data.communities && data.communities.length > 1) {
+      html += '<div class="card"><div class="card-head"><h3>Communities</h3><span class="pill">' + data.communities.length + ' modules</span></div>' +
+        '<p class="cap">States partitioned into modules — groups of activities more tightly linked to each other than to the rest of the network (ladyna <code>' + esc(data.communityMethod || "community") + '</code>). Each module is a cluster of behaviour that tends to co-occur.</p>' +
+        '<div id="tnaComm"></div></div>';
+    }
+
     // ---- Sequence index plot (paginated) ------------------------------------
     html += '<div class="card"><div class="card-head"><h3>Sequence index plot</h3><span class="pill">' + fmt(data.sequencesTotal) + " sessions</span></div>" +
       '<p class="cap">Each row is one session; each cell is the activity at that ordinal step. Reads left→right in play order (first ' + data.seqLenCap + " steps). Page through every session with the controls below.</p>" +
@@ -91,14 +137,14 @@
 
     // ---- Clustering ---------------------------------------------------------
     var selOpts = function (list, cur) { return list.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === cur ? " selected" : "") + ">" + esc(o[1]) + "</option>"; }).join(""); };
-    var ALGOS = [["kmeans", "k-means"], ["pam", "k-medoids (PAM)"], ["hierarchical", "Hierarchical"]];
-    var DISS = [["euclidean", "Euclidean"], ["manhattan", "Manhattan"], ["cosine", "Cosine"], ["jensenshannon", "Jensen–Shannon"], ["sequence", "Sequence (edit distance)"]];
-    var LINKS = [["average", "Average"], ["complete", "Complete"], ["ward", "Ward"], ["single", "Single"]];
+    var ALGOS = [["pam", "PAM (k-medoids)"], ["hierarchical", "Hierarchical"]];
+    var DISS = [["hamming", "Hamming"], ["lv", "Levenshtein"], ["osa", "OSA"], ["dl", "Damerau–Levenshtein"], ["lcs", "LCS"], ["qgram", "q-gram"], ["jw", "Jaro–Winkler"]];
+    var LINKS = [["average", "Average"], ["complete", "Complete"], ["ward.D2", "Ward.D2"], ["single", "Single"]];
     html += '<div class="card"><div class="card-head"><h3>Clustering</h3><span class="pill">group sessions</span></div>' +
-      '<p class="cap">Group sessions by how students move through the game, then compare each cluster’s transition network and sequences. Pick a dissimilarity (feature-space vectors, or the raw sequence order) and an algorithm. Colours match the legend above.</p>' +
+      '<p class="cap">Group sessions by how students move through the game, then compare each cluster’s transition network and sequences. Clustering is done by <b>ladyna</b> on a validated sequence dissimilarity (edit-distance family) via PAM or an agglomerative linkage. Colours match the legend above.</p>' +
       '<div class="tna-controls" style="padding:2px 0 8px">' +
-      '<div class="tna-ctl"><label>Algorithm</label><select id="tnaAlgo">' + selOpts(ALGOS, st.clAlgo || "kmeans") + "</select></div>" +
-      '<div class="tna-ctl" id="tnaDissCtl"><label>Dissimilarity</label><select id="tnaDiss">' + selOpts(DISS, st.clDiss || "euclidean") + "</select></div>" +
+      '<div class="tna-ctl"><label>Algorithm</label><select id="tnaAlgo">' + selOpts(ALGOS, st.clAlgo || "pam") + "</select></div>" +
+      '<div class="tna-ctl" id="tnaDissCtl"><label>Dissimilarity</label><select id="tnaDiss">' + selOpts(DISS, st.clDiss || "lv") + "</select></div>" +
       '<div class="tna-ctl" id="tnaLinkCtl"><label>Linkage</label><select id="tnaLink">' + selOpts(LINKS, st.clLink || "average") + "</select></div>" +
       '<div class="tna-ctl"><label>Clusters (k)</label><input type="number" id="tnaK" min="2" max="8" step="1" value="' + (st.k || 3) + '" style="width:74px"></div>' +
       '<div class="tna-ctl"><label>&nbsp;</label><button class="btn sm" id="tnaClusterBtn">Run clustering</button></div>' +
@@ -106,8 +152,25 @@
       '<div class="tna-ctl"><label>Edge labels</label><label class="tna-switch"><input type="checkbox" id="tnaClEdgeLbl"' + (st.clEdgeLabels !== false ? " checked" : "") + '><span>Show</span></label></div>' +
       '</div><div id="tnaClusters"></div></div>';
 
-    // ---- Validation ---------------------------------------------------------
-    html += '<div id="tnaValidation">' + validationHTML(data.validation) + "</div>";
+    // ---- Behaviour patterns → outcome --------------------------------------
+    var OUTCOMES = [["score", "Score"], ["stars", "Stars"], ["pass", "Pass (median split)"]];
+    html += '<div class="card"><div class="card-head"><h3>Behaviour patterns → outcome</h3><span class="pill">what predicts success</span></div>' +
+      '<p class="cap">ladyna mines frequent sequential patterns and screens each for association with a run outcome. For Score/Stars the effect is the change in the outcome when the pattern is present (OLS); for Pass it is the log-odds (logistic). Adjusted p-values use Benjamini–Hochberg.</p>' +
+      '<div class="tna-controls" style="padding:2px 0 8px">' +
+      '<div class="tna-ctl"><label>Outcome</label><select id="tnaPatOutcome">' + selOpts(OUTCOMES, st.patOutcome || "score") + "</select></div>" +
+      '<div class="tna-ctl"><label>Min support</label><input type="number" id="tnaPatSupport" min="0.02" max="0.9" step="0.02" value="' + (st.patSupport || 0.1) + '" style="width:82px"></div>' +
+      '<div class="tna-ctl"><label>&nbsp;</label><button class="btn sm" id="tnaPatBtn">Mine patterns</button></div>' +
+      '</div><div id="tnaPatterns"></div></div>';
+
+    // ---- Cohort comparison --------------------------------------------------
+    var CMPBY = [["score", "Score"], ["stars", "Stars"]];
+    html += '<div class="card"><div class="card-head"><h3>Cohort comparison</h3><span class="pill">high vs low</span></div>' +
+      '<p class="cap">Splits sessions into two cohorts by a median split on an outcome, builds a transition network for each over a shared state set, and compares them edge-by-edge with a permutation test (ladyna). A significant edge is one whose transition probability differs between high and low performers.</p>' +
+      '<div class="tna-controls" style="padding:2px 0 8px">' +
+      '<div class="tna-ctl"><label>Split by</label><select id="tnaCmpBy">' + selOpts(CMPBY, st.cmpGroupBy || "score") + "</select></div>" +
+      '<div class="tna-ctl"><label>Iterations</label><input type="number" id="tnaCmpIter" min="100" max="2000" step="100" value="' + (st.cmpIter || 500) + '" style="width:90px"></div>' +
+      '<div class="tna-ctl"><label>&nbsp;</label><button class="btn sm" id="tnaCmpBtn">Compare cohorts</button></div>' +
+      '</div><div id="tnaCompare"></div></div>';
 
     container.innerHTML = html;
 
@@ -139,7 +202,13 @@
       var big = Math.max(0.42, Math.min(1, 5 / Math.max(1, M)));
       var R = opts.nodeR != null ? opts.nodeR : 14 + 10 * big;
       var ringGap = 0, ringW = opts.ringW != null ? opts.ringW : (3.5 + 2 * big);   // ring hugs the disc — no gap
-      var maxW = edges.reduce(function (m, e) { return Math.max(m, e.probability); }, 0) || 1;
+      // Edge magnitude / colour / label are pluggable so the same renderer draws
+      // both the probability network and the signed cohort-difference network.
+      var edgeMag = opts.edgeMag || function (e) { return e.probability; };
+      var edgeColorFn = opts.edgeColorFn || null;
+      var edgeLabelFn = opts.edgeLabelFn || null;
+      var edgeTitleFn = opts.edgeTitleFn || null;
+      var maxW = edges.reduce(function (m, e) { return Math.max(m, edgeMag(e)); }, 0) || 1;
       var rad = {}, ringR = {};
       nodes.forEach(function (n) { rad[n.id] = R; ringR[n.id] = R + ringGap + ringW / 2; });
 
@@ -157,7 +226,7 @@
       });
 
       var thr = opts.minWeight || 0;
-      var shown = edges.filter(function (e) { return e.probability >= thr; });
+      var shown = edges.filter(function (e) { return edgeMag(e) >= thr; });
       var showLabels = !!opts.edgeLabels;
       var labelMin = opts.edgeLabelMin != null ? opts.edgeLabelMin : 0;
       var weightMode = opts.weightMode;
@@ -170,18 +239,20 @@
       var edgeObjs = shown.map(function (e) {
         if (!pos[e.from] || !pos[e.to]) return null;
         var self = e.from === e.to;
+        var mag = edgeMag(e);
         // Thin edges (per the reference); width still nudges with weight but
         // stays in a slim range. Opacity carries most of the weight signal.
-        var wpx = 0.9 + (e.probability / maxW) * 2.1;
-        var op = 0.4 + 0.55 * (e.probability / maxW);
-        var path = svgEl("path", { "class": self ? "tna-loop" : "tna-edge", "data-f": e.from, "data-t": e.to, fill: "none", stroke: EDGE_GOLD, "stroke-width": wpx.toFixed(1), "stroke-linecap": "round", opacity: op.toFixed(2) });
-        var ttl = svgEl("title"); ttl.textContent = pretty(e.from) + " → " + pretty(e.to) + "  ·  p=" + e.probability.toFixed(3) + "  ·  n=" + e.count; path.appendChild(ttl);
-        var arrow = svgEl("path", { "class": "tna-arrow", "data-f": e.from, "data-t": e.to, fill: EDGE_GOLD, opacity: Math.min(1, op + 0.12).toFixed(2) });
+        var wpx = 0.9 + (mag / maxW) * 2.1;
+        var op = 0.4 + 0.55 * (mag / maxW);
+        var stroke = edgeColorFn ? edgeColorFn(e) : EDGE_GOLD;
+        var path = svgEl("path", { "class": self ? "tna-loop" : "tna-edge", "data-f": e.from, "data-t": e.to, fill: "none", stroke: stroke, "stroke-width": wpx.toFixed(1), "stroke-linecap": "round", opacity: op.toFixed(2) });
+        var ttl = svgEl("title"); ttl.textContent = edgeTitleFn ? edgeTitleFn(e) : (pretty(e.from) + " → " + pretty(e.to) + "  ·  p=" + e.probability.toFixed(3) + "  ·  n=" + e.count); path.appendChild(ttl);
+        var arrow = svgEl("path", { "class": "tna-arrow", "data-f": e.from, "data-t": e.to, fill: stroke, opacity: Math.min(1, op + 0.12).toFixed(2) });
         gEdges.appendChild(path); gEdges.appendChild(arrow);
         var o = { e: e, self: self, wpx: wpx, path: path, arrow: arrow, label: null };
-        if (showLabels && e.probability / maxW >= labelMin) {
+        if (showLabels && mag / maxW >= labelMin) {
           var lbl = svgEl("text", { "class": "tna-elabel", "data-f": e.from, "data-t": e.to, "text-anchor": "middle" });
-          lbl.textContent = edgeLabel(e, weightMode); gLabels.appendChild(lbl); o.label = lbl;
+          lbl.textContent = edgeLabelFn ? edgeLabelFn(e) : edgeLabel(e, weightMode); gLabels.appendChild(lbl); o.label = lbl;
         }
         return o;
       }).filter(Boolean);
@@ -417,6 +488,60 @@
     }
     drawCent();
 
+    // ---- Centrality comparison bar chart (client-only measure switch) ------
+    // Reuses the activity-frequency bar styling (.tna-hbars). Switching the
+    // measure re-ranks locally — no server round-trip — and hovering a bar
+    // isolates that state's transitions in the network, like the freq chart.
+    var centBarsMount = container.querySelector("#tnaCentBars");
+    var centMeasureSel = container.querySelector("#tnaCentMeasure");
+    function centMeasureMeta(key) { for (var i = 0; i < CENT_MEASURES.length; i++) if (CENT_MEASURES[i][0] === key) return CENT_MEASURES[i]; return CENT_MEASURES[0]; }
+    function drawCentBars() {
+      var meta = centMeasureMeta(st.centMeasure || "betweenness"), key = meta[0], prec = meta[2];
+      var items = data.centrality.map(function (r) { return { id: r.state, value: +r[key] || 0 }; }).sort(function (a, b) { return b.value - a.value; });
+      if (!items.length) { centBarsMount.innerHTML = '<p class="muted small">No states to chart.</p>'; return; }
+      var maxV = items.reduce(function (m, x) { return Math.max(m, x.value); }, 0) || 1;
+      var rows = items.map(function (it) {
+        var c = colorOf[it.id] || COL.muted, w = maxV > 0 ? Math.max(2, it.value / maxV * 100) : 2;
+        return '<div class="tna-hbar" data-id="' + esc(it.id) + '" tabindex="0">' +
+          '<div class="hb-name" style="color:' + c + '">' + esc(pretty(it.id)) + "</div>" +
+          '<div class="hb-track"><i style="width:' + w.toFixed(1) + "%;background:" + c + '"></i></div>' +
+          '<div class="hb-val">' + dec(it.value, prec) + "</div></div>";
+      }).join("");
+      centBarsMount.innerHTML = '<div class="tna-hbars">' + rows + '<div class="chart-tip" id="tnaCentTip" style="display:none"></div></div>';
+
+      var wrap = centBarsMount.querySelector(".tna-hbars"), tip = centBarsMount.querySelector("#tnaCentTip");
+      [].forEach.call(wrap.querySelectorAll(".tna-hbar"), function (row) {
+        var id = row.getAttribute("data-id");
+        var it = items.filter(function (x) { return String(x.id) === id; })[0];
+        function enter() { if (netApi) netApi.isolate(id, true); }
+        function leave() { tip.style.display = "none"; if (netApi) netApi.isolate(id, false); }
+        function move(e) {
+          tip.innerHTML = '<div class="r"><i style="background:' + (colorOf[id] || COL.muted) + '"></i>' + esc(pretty(id)) + " · " + esc(meta[1]) + " <b>" + dec(it.value, prec) + "</b></div>";
+          tip.style.display = "block";
+          var hr = wrap.getBoundingClientRect(), x = e.clientX - hr.left, y = e.clientY - hr.top;
+          tip.style.left = Math.min(wrap.clientWidth - tip.offsetWidth - 6, Math.max(6, x + 14)) + "px";
+          tip.style.top = Math.max(4, y - tip.offsetHeight - 8) + "px";
+        }
+        row.addEventListener("mouseenter", enter);
+        row.addEventListener("mousemove", move);
+        row.addEventListener("mouseleave", leave);
+        row.addEventListener("focus", enter);
+        row.addEventListener("blur", leave);
+      });
+    }
+    centMeasureSel.addEventListener("change", function () { st.centMeasure = centMeasureSel.value; drawCentBars(); });
+    drawCentBars();
+
+    // ---- Communities (state modules, coloured chips per group) --------------
+    var commMount = container.querySelector("#tnaComm");
+    if (commMount && data.communities && data.communities.length) {
+      commMount.innerHTML = '<div style="display:flex;flex-direction:column;gap:12px">' + data.communities.map(function (grp) {
+        return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+          '<span class="pill" style="min-width:78px">Module ' + (grp.id + 1) + "</span>" +
+          grp.states.map(function (s2) { return chip(s2, 1); }).join(" ") + "</div>";
+      }).join("") + "</div>";
+    }
+
     // ---- Sequence index plot (paginated, uses shared hardened seqSVG) ------
     // The initial page ships with the /tna payload; Prev/Next fetch adjacent
     // pages from /tna/sequences (order is stable, so offsets line up). The card
@@ -469,6 +594,114 @@
       return body;
     }
 
+    // Markov-order test: is a first-order model (the TNA assumption) justified?
+    function markovHTML(m) {
+      if (!m || !m.testTable || !m.testTable.length) return "";
+      var order1 = m.testTable.filter(function (r) { return r.order === 1; })[0];
+      var firstOrderOk = order1 && order1.significant;
+      var higher = (m.optimalOrder || 1) > 1;
+      var verdict = !firstOrderOk
+        ? '<span class="pill">no order-1 structure</span>'
+        : (higher ? '<span class="pill warn">higher-order structure present</span>' : '<span class="pill go">first-order justified</span>');
+      var rows = m.testTable.map(function (r) {
+        return '<tr' + (r.order === m.optimalOrder ? ' class="tna-sig-row"' : "") + "><td>" + r.order + '</td><td class="num">' + dec(r.aic, 1) + '</td><td class="num">' + dec(r.bic, 1) + '</td><td class="num">' + (r.g2 != null ? dec(r.g2, 2) : "—") + '</td><td class="num">' + (r.df != null ? r.df : "—") + '</td><td class="num">' + (r.pPermutation != null ? dec(r.pPermutation, 3) : "—") + '</td><td>' + (r.significant ? '<span class="tna-sig">✓</span>' : '<span class="muted">·</span>') + "</td></tr>";
+      }).join("");
+      return '<div class="card"><div class="card-head"><h3>Markov order test</h3>' + verdict + "</div>" +
+        '<p class="cap">A within-window permutation likelihood-ratio test of how much memory the sequences carry. Order 1 significant ⇒ transitions depend on the current state (the TNA premise holds). Optimal order = <b>' + m.optimalOrder + '</b> (AIC ' + m.aicOrder + ' · BIC ' + m.bicOrder + '); an optimal order above 1 means real dependencies reach further back than a first-order network captures.</p>' +
+        '<div class="tbl-wrap"><table><thead><tr><th class="no-sort">Order</th><th class="num">AIC</th><th class="num">BIC</th><th class="num">G²</th><th class="num">df</th><th class="num">p</th><th class="no-sort">Sig</th></tr></thead><tbody>' + rows + "</tbody></table></div></div>";
+    }
+
+    // Case-drop stability card shell: a Graph|Table toggle, per-measure legend
+    // chips (click to add/remove a line), and a body mount wired after injection.
+    function stabilityHTML(s) {
+      if (!s || !s.csCoefficients) return "";
+      var measures = s.measures || Object.keys(s.csCoefficients);
+      if (!measures.length) return "";
+      var legend = measures.map(function (m) {
+        var off = st.stabHidden && st.stabHidden[m];
+        return '<button class="tna-legend-chip' + (off ? " off" : "") + '" data-m="' + esc(m) + '"><i style="background:' + stabColor(measures, m) + '"></i>' + esc(m) + "</button>";
+      }).join("");
+      return '<div class="card" id="tnaStability"><div class="card-head"><h3>Network stability</h3><span class="spacer"></span>' + viewSeg(st.stabView) + "</div>" +
+        '<p class="cap">Case-drop reliability: at each drop proportion, sessions are resampled and each centrality measure is re-correlated with the full-sample ordering. A measure is stable if the curve stays high as more cases are dropped; the CS coefficient is the largest drop still above ' + s.threshold + ' (in 95% of resamples). CS ≥ 0.5 stable, ≥ 0.25 acceptable.</p>' +
+        '<div class="tna-legend-toggles">' + legend + "</div>" +
+        '<div id="tnaStabBody"></div></div>';
+    }
+
+    // Wire the stability card (called from the mounting section after injection):
+    // legend add/remove, Graph|Table toggle, line-chart / table draw.
+    function wireStability(s) {
+      var card = container.querySelector("#tnaStability");
+      if (!card || !s) return;
+      var measures = s.measures || Object.keys(s.csCoefficients || {});
+      var bodyMount = card.querySelector("#tnaStabBody");
+      function activeMeasures() { return measures.filter(function (m) { return !(st.stabHidden && st.stabHidden[m]); }); }
+      function draw() {
+        if (st.stabView === "table") bodyMount.innerHTML = stabilityTableHTML(s, measures);
+        else bodyMount.innerHTML = stabilityChartSVG(s, activeMeasures());
+      }
+      wireViewToggle(card, function () { return st.stabView; }, function (v) { st.stabView = v; draw(); });
+      [].forEach.call(card.querySelectorAll(".tna-legend-chip"), function (b) {
+        b.addEventListener("click", function () {
+          var m = b.getAttribute("data-m");
+          st.stabHidden = st.stabHidden || {};
+          st.stabHidden[m] = !st.stabHidden[m];
+          b.classList.toggle("off", !!st.stabHidden[m]);
+          if (st.stabView !== "table") draw();   // table shows all rows regardless
+        });
+      });
+      draw();
+    }
+    function stabilityTableHTML(s, measures) {
+      var band = function (v) { return v >= 0.5 ? "go" : v >= 0.25 ? "warn" : "bad"; };
+      var bandTxt = function (v) { return v >= 0.5 ? "stable" : v >= 0.25 ? "acceptable" : "fragile"; };
+      var rows = measures.map(function (k) {
+        var v = s.csCoefficients[k];
+        return "<tr><td><span class=\"tna-legend-dot\" style=\"background:" + stabColor(measures, k) + "\"></span>" + esc(k) + '</td><td class="num">' + dec(v, 2) + '</td><td><span class="pill ' + band(v) + '">' + bandTxt(v) + "</span></td></tr>";
+      }).join("");
+      return '<div class="tbl-wrap"><table><thead><tr><th class="no-sort">Measure</th><th class="num">CS</th><th class="no-sort">Rating</th></tr></thead><tbody>' + rows + "</tbody></table></div>";
+    }
+    // Line chart: mean correlation vs proportion dropped, one line per active
+    // measure, with a ± sd band and the CS threshold marked.
+    function stabilityChartSVG(s, active) {
+      var measures = s.measures || Object.keys(s.csCoefficients || {});
+      var drops = (s.dropProps || []).slice().sort(function (a, b) { return a - b; });
+      if (!drops.length || !active.length) return '<p class="muted small">Select at least one measure to plot.</p>';
+      var byMeasure = {}; measures.forEach(function (m) { byMeasure[m] = {}; });
+      (s.curve || []).forEach(function (r) { if (byMeasure[r.measure]) byMeasure[r.measure][r.dropProp] = r; });
+      var W = 960, H = 620, pad = { l: 52, r: 16, t: 14, b: 40 };
+      var xmin = drops[0], xmax = drops[drops.length - 1];
+      var ymin = 0, ymax = 1;
+      var X = function (v) { return pad.l + (W - pad.l - pad.r) * (xmax === xmin ? 0.5 : (v - xmin) / (xmax - xmin)); };
+      var Y = function (v) { return H - pad.b - (H - pad.t - pad.b) * ((v - ymin) / (ymax - ymin)); };
+      var s2 = '<svg viewBox="0 0 ' + W + " " + H + '" class="ichart" preserveAspectRatio="xMidYMid meet">';
+      for (var g = 0; g <= 4; g++) { var gv = ymin + (ymax - ymin) * g / 4, gy = Y(gv); s2 += '<line x1="' + pad.l + '" y1="' + gy.toFixed(1) + '" x2="' + (W - pad.r) + '" y2="' + gy.toFixed(1) + '" stroke="' + COL.line + '" opacity=".5"/><text x="' + (pad.l - 6) + '" y="' + (gy + 3).toFixed(1) + '" fill="' + COL.muted + '" font-size="10" text-anchor="end">' + dec(gv, 2) + "</text>"; }
+      // threshold line
+      var ty = Y(s.threshold); s2 += '<line x1="' + pad.l + '" y1="' + ty.toFixed(1) + '" x2="' + (W - pad.r) + '" y2="' + ty.toFixed(1) + '" stroke="' + COL.muted + '" stroke-dasharray="5 4" opacity=".7"/><text x="' + (W - pad.r) + '" y="' + (ty - 5).toFixed(1) + '" fill="' + COL.muted + '" font-size="10" text-anchor="end">threshold = ' + s.threshold + "</text>";
+      // x ticks
+      drops.forEach(function (d0) { s2 += '<text x="' + X(d0).toFixed(1) + '" y="' + (H - 22) + '" fill="' + COL.muted + '" font-size="10" text-anchor="middle">' + d0 + "</text>"; });
+      s2 += '<text x="' + ((pad.l + W - pad.r) / 2).toFixed(1) + '" y="' + (H - 6) + '" fill="' + COL.muted + '" font-size="11" text-anchor="middle">Proportion dropped</text>';
+      // one line (+ band) per active measure
+      active.forEach(function (m) {
+        var col = stabColor(measures, m);
+        var pts = drops.map(function (d0) { var r = byMeasure[m][d0]; return r ? { x: d0, y: r.meanCor, sd: r.sdCor || 0 } : null; }).filter(Boolean);
+        if (pts.length < 1) return;
+        var up = pts.map(function (p, i) { return (i ? "L" : "M") + X(p.x).toFixed(1) + " " + Y(Math.min(1, p.y + p.sd)).toFixed(1); }).join(" ");
+        var dn = pts.slice().reverse().map(function (p) { return "L" + X(p.x).toFixed(1) + " " + Y(Math.max(0, p.y - p.sd)).toFixed(1); }).join(" ");
+        s2 += '<path d="' + up + " " + dn + ' Z" fill="' + col + '" opacity="0.12"/>';
+        var line = pts.map(function (p, i) { return (i ? "L" : "M") + X(p.x).toFixed(1) + " " + Y(p.y).toFixed(1); }).join(" ");
+        s2 += '<path d="' + line + '" fill="none" stroke="' + col + '" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>';
+        pts.forEach(function (p) { s2 += '<circle cx="' + X(p.x).toFixed(1) + '" cy="' + Y(p.y).toFixed(1) + '" r="3.2" fill="' + col + '" stroke="#0b1120" stroke-width="1.2"><title>' + esc(m) + " · drop " + p.x + " · r=" + dec(p.y, 3) + "</title></circle>"; });
+      });
+      s2 += '<text transform="translate(14,' + ((pad.t + H - pad.b) / 2).toFixed(1) + ') rotate(-90)" fill="' + COL.muted + '" font-size="11" text-anchor="middle">Mean correlation</text>';
+      s2 += "</svg>";
+      return '<div style="max-width:820px;margin:0 auto">' + s2 + "</div>";
+    }
+
+    // Whole validation + diagnostics block (bootstrap · Markov order · stability).
+    function diagnosticsHTML(d) {
+      return validationHTML(d.validation) + markovHTML(d.markov) + stabilityHTML(d.stability);
+    }
+
     // =======================================================================
     // CONTROL WIRING
     // =======================================================================
@@ -491,11 +724,10 @@
     var algoSel = container.querySelector("#tnaAlgo"), dissSel = container.querySelector("#tnaDiss"), linkSel = container.querySelector("#tnaLink");
     var dissCtl = container.querySelector("#tnaDissCtl"), linkCtl = container.querySelector("#tnaLinkCtl");
     function syncClusterControls() {
-      // Linkage only applies to hierarchical; k-means is fixed to Euclidean.
+      // Linkage only applies to hierarchical; both PAM and hierarchical act on
+      // the chosen sequence dissimilarity.
       linkCtl.style.display = algoSel.value === "hierarchical" ? "" : "none";
-      var isK = algoSel.value === "kmeans";
-      dissSel.disabled = isK; dissCtl.style.opacity = isK ? 0.45 : 1;
-      dissCtl.title = isK ? "k-means uses Euclidean distance in feature space" : "";
+      dissSel.disabled = false; dissCtl.style.opacity = 1; dissCtl.title = "";
     }
     algoSel.addEventListener("change", function () { st.clAlgo = algoSel.value; syncClusterControls(); });
     dissSel.addEventListener("change", function () { st.clDiss = dissSel.value; });
@@ -527,8 +759,8 @@
       var cls = cd.clusters || [];
       if (!cls.length) { clusterMount.innerHTML = '<p class="muted small">No clusters produced.</p>'; return; }
       var M = cd.method || {}, Q = cd.quality || {};
-      var algoName = { kmeans: "k-means", pam: "k-medoids", hierarchical: "hierarchical" }[M.algorithm] || M.algorithm || "";
-      var dissName = { euclidean: "Euclidean", manhattan: "Manhattan", cosine: "Cosine", jensenshannon: "Jensen–Shannon", sequence: "edit distance" }[M.dissimilarity] || M.dissimilarity || "";
+      var algoName = { pam: "PAM (k-medoids)", hierarchical: "hierarchical" }[M.algorithm] || M.algorithm || "";
+      var dissName = { hamming: "Hamming", lv: "Levenshtein", osa: "OSA", dl: "Damerau–Levenshtein", lcs: "LCS", qgram: "q-gram", jw: "Jaro–Winkler" }[M.dissimilarity] || M.dissimilarity || "";
       var head = '<div class="tna-cluster-head small muted"><b style="color:var(--ink)">' + esc(algoName) + (M.linkage ? " · " + esc(M.linkage) : "") + "</b> · " + esc(dissName) +
         " · " + cd.k + " clusters over " + fmt(cd.n) + " sessions" + (cd.sampledFrom ? " (sampled from " + fmt(cd.sampledFrom) + ")" : "") +
         (Q.silhouette != null ? ' · silhouette <b style="color:var(--ink)">' + dec(Q.silhouette, 3) + "</b>" : "") +
@@ -554,6 +786,134 @@
         if (sm) sm.innerHTML = seqSVG(cl.sequences, { total: cl.size, maxRows: 14, rowH: 9 });
       });
     }
+
+    // ---- Behaviour patterns → outcome (lazy) -------------------------------
+    var patMount = container.querySelector("#tnaPatterns");
+    var patOutcomeSel = container.querySelector("#tnaPatOutcome");
+    var patSupportIn = container.querySelector("#tnaPatSupport");
+    // ladyna pattern names join states with "->"; render as a chip chain.
+    function patternChips(patStr) {
+      return String(patStr).split("->").map(function (s2, i) { return (i ? '<span class="seqarrow">→</span>' : "") + chip(s2.trim(), 1); }).join("");
+    }
+    function pTxt(v) { return v == null ? "—" : (v < 0.001 ? "<0.001" : dec(v, 3)); }
+    // Diverging colour by standardized residual: blue = over-represented in the
+    // High cohort, red = over-represented in the Low cohort (intensity ∝ |resid|).
+    function residColor(r) { var mag = Math.min(1, Math.abs(r) / 5); var base = r >= 0 ? "90,169,255" : "224,84,78"; return "rgba(" + base + "," + (0.3 + 0.6 * mag).toFixed(2) + ")"; }
+
+    function renderPatterns(pd) {
+      if (!pd || pd.error) {
+        var msg = pd && pd.error === "not_enough_data" ? "Not enough sessions with an outcome to compare (need ≥ 6 scored; high " + ((pd && pd.groupHigh) || 0) + ", low " + ((pd && pd.groupLow) || 0) + ")."
+          : "Pattern mining failed" + (pd && pd.detail ? ": " + esc(pd.detail) : "") + ".";
+        patMount.innerHTML = '<div class="empty">' + msg + "</div>"; return;
+      }
+      var rows = pd.patterns || [];
+      var head = '<div class="small muted"><b style="color:var(--ink)">' + esc(pd.groupA.label) + "</b> (" + fmt(pd.groupA.size) + ') vs <b style="color:var(--ink)">' + esc(pd.groupB.label) + "</b> (" + fmt(pd.groupB.size) + ") · " + rows.length + " patterns · min support " + pct(pd.minSupport) + "</div>";
+      patMount.innerHTML = '<div class="tna-view-head">' + head + viewSeg(st.patView) + '</div><div id="tnaPatBody"></div>';
+      wireViewToggle(patMount, function () { return st.patView; }, function (v) { st.patView = v; drawPatBody(pd); });
+      drawPatBody(pd);
+    }
+    function drawPatBody(pd) {
+      var body = patMount.querySelector("#tnaPatBody");
+      var rows = pd.patterns || [];
+      if (!rows.length) { body.innerHTML = '<p class="muted small">No patterns at this support threshold — lower Min support.</p>'; return; }
+      body.innerHTML = st.patView === "table" ? patternTableHTML(rows) : pyramidHTML(pd, rows);
+    }
+    function patternTableHTML(rows) {
+      return '<div class="tbl-wrap"><table><thead><tr><th class="no-sort">Pattern</th><th class="num">Support</th><th class="num">High n</th><th class="num">Low n</th><th class="num">Std. resid.</th><th class="num">p</th><th class="no-sort">Sig</th></tr></thead><tbody>' +
+        rows.map(function (r) {
+          return "<tr" + (r.significant ? "" : ' class="tna-unstable"') + '><td><div class="seqchain">' + patternChips(r.pattern) + "</div></td>" +
+            '<td class="num">' + (r.support != null ? pct(r.support) : "—") + '</td><td class="num">' + fmt(r.countHigh) + '</td><td class="num">' + fmt(r.countLow) + "</td>" +
+            '<td class="num" style="color:' + (r.stdResid >= 0 ? "#a7c8ff" : "#ffb0b0") + '">' + fmtSigned(r.stdResid, 2) + "</td>" +
+            '<td class="num">' + pTxt(r.p) + "</td>" +
+            "<td>" + (r.significant ? '<span class="tna-sig">✓</span>' : '<span class="muted">·</span>') + "</td></tr>";
+        }).join("") + "</tbody></table></div>";
+    }
+    // Diverging pyramid: High cohort bars grow left, Low cohort right, each scaled
+    // to the largest proportion, coloured by the standardized residual.
+    function pyramidHTML(pd, rows) {
+      var top = rows.slice(0, 16);
+      var maxP = top.reduce(function (m, r) { return Math.max(m, r.propHigh, r.propLow); }, 0.0001);
+      var head = '<div class="pyr-axis small muted"><span>← ' + esc(pd.groupA.label) + '</span><span>' + esc(pd.groupB.label) + " →</span></div>";
+      var body = top.map(function (r) {
+        var wH = (r.propHigh / maxP * 100).toFixed(1), wL = (r.propLow / maxP * 100).toFixed(1);
+        var star = starOf(r.p) || (r.p != null && r.p <= 0.05 ? "*" : "");
+        return '<div class="pyr-row"><div class="pyr-label" title="' + esc(r.pattern) + '">' + patternChips(r.pattern) + "</div>" +
+          '<div class="pyr-bars">' +
+            '<div class="pyr-side pyr-left"><span class="pyr-n">' + fmt(r.countHigh) + '</span><i style="width:' + wH + "%;background:" + residColor(r.stdResid) + '"></i></div>' +
+            '<div class="pyr-mid" title="std. residual ' + fmtSigned(r.stdResid, 2) + " · p " + pTxt(r.p) + '">' + (star || "·") + "</div>" +
+            '<div class="pyr-side pyr-right"><i style="width:' + wL + "%;background:" + residColor(-r.stdResid) + '"></i><span class="pyr-n">' + fmt(r.countLow) + "</span></div>" +
+          "</div></div>";
+      }).join("");
+      var legend = '<div class="tna-legend small muted"><span><i style="background:' + residColor(3) + '"></i> over-represented in ' + esc(pd.groupA.label) + "</span><span><i style=\"background:" + residColor(-3) + '"></i> over-represented in ' + esc(pd.groupB.label) + "</span><span>bar ∝ share of cohort · * p≤.05</span></div>";
+      return '<div class="tna-pyramid">' + head + body + "</div>" + legend;
+    }
+    patOutcomeSel.addEventListener("change", function () { st.patOutcome = patOutcomeSel.value; });
+    container.querySelector("#tnaPatBtn").addEventListener("click", function () {
+      st.patOutcome = patOutcomeSel.value;
+      st.patSupport = Math.max(0.02, Math.min(0.9, parseFloat(patSupportIn.value) || 0.1)); patSupportIn.value = st.patSupport;
+      patMount.innerHTML = '<div class="spin">Mining patterns…</div>';
+      ctx.loadPatterns({ outcome: st.patOutcome, minSupport: st.patSupport }).then(renderPatterns).catch(function (e) { patMount.innerHTML = '<div class="empty">Pattern mining failed: ' + esc(e && e.message) + "</div>"; });
+    });
+
+    // ---- Cohort comparison (lazy) ------------------------------------------
+    var cmpMount = container.querySelector("#tnaCompare");
+    var cmpBySel = container.querySelector("#tnaCmpBy");
+    var cmpIterIn = container.querySelector("#tnaCmpIter");
+    var cmpPos = {};   // drag positions for the diff network, kept across view toggles
+    function renderCompare(cd) {
+      if (!cd || cd.error) {
+        var msg = cd && cd.error === "not_enough_data" ? "Not enough sessions with this outcome to compare (need ≥ 8)."
+          : cd && cd.error === "degenerate_split" ? "The median split is too lopsided to compare (high " + ((cd && cd.groupA) || 0) + ", low " + ((cd && cd.groupB) || 0) + ")."
+          : "Comparison failed" + (cd && cd.detail ? ": " + esc(cd.detail) : "") + ".";
+        cmpMount.innerHTML = '<div class="empty">' + msg + "</div>"; return;
+      }
+      cmpPos = {};
+      var head = '<div class="small muted"><b style="color:var(--ink)">' + esc(cd.groupA.label) + "</b> (" + fmt(cd.groupA.size) + ') vs <b style="color:var(--ink)">' + esc(cd.groupB.label) + "</b> (" + fmt(cd.groupB.size) + ") · " + cd.significant + " / " + cd.total + " edges differ · " + fmt(cd.iter) + " permutations</div>";
+      cmpMount.innerHTML = '<div class="tna-view-head">' + head + viewSeg(st.cmpView) + '</div><div id="tnaCmpBody"></div>';
+      wireViewToggle(cmpMount, function () { return st.cmpView; }, function (v) { st.cmpView = v; drawCmpBody(cd); });
+      drawCmpBody(cd);
+    }
+    function drawCmpBody(cd) {
+      var body = cmpMount.querySelector("#tnaCmpBody");
+      var rows = cd.edges || [];
+      if (!rows.length) { body.innerHTML = '<p class="muted small">No shared transitions to compare.</p>'; return; }
+      if (st.cmpView === "table") { body.innerHTML = compareTableHTML(rows); return; }
+      drawDiffNetwork(body, cd);
+    }
+    function compareTableHTML(rows) {
+      return '<div class="tbl-wrap"><table><thead><tr><th class="no-sort">From</th><th class="no-sort">To</th><th class="num">High</th><th class="num">Low</th><th class="num">Δ (H−L)</th><th class="num">Effect</th><th class="num">p</th><th class="no-sort">Sig</th></tr></thead><tbody>' +
+        rows.map(function (e) {
+          return "<tr" + (e.significant ? "" : ' class="tna-unstable"') + ">" + "<td>" + chip(e.from, 1) + "</td><td>" + chip(e.to, 1) + "</td>" +
+            '<td class="num">' + dec(e.weightA, 2) + '</td><td class="num">' + dec(e.weightB, 2) + "</td>" +
+            '<td class="num" style="color:' + (e.diff >= 0 ? "#a7e9c6" : "#ffb0b0") + '">' + fmtSigned(e.diff, 2) + "</td>" +
+            '<td class="num">' + (e.effectSize != null ? dec(e.effectSize, 2) : "—") + '</td><td class="num">' + pTxt(e.pValue) + "</td>" +
+            "<td>" + (e.significant ? '<span class="tna-sig">✓</span>' : '<span class="muted">·</span>') + "</td></tr>";
+        }).join("") + "</tbody></table></div>";
+    }
+    // Cohort-difference network: same renderer as the main graph, but edges are
+    // coloured by which cohort favours them and labelled with Δ + significance.
+    function drawDiffNetwork(mount, cd) {
+      var nodes = cd.labels.map(function (l) { return { id: l, frequency: 0, initial: 0 }; });
+      buildNetwork(mount, nodes, cd.edges, {
+        W: 750, H: 600, minWeight: 0, nodeLabels: true, edgeLabels: true, posStore: cmpPos,
+        edgeMag: function (e) { return Math.abs(e.diff) || 1e-6; },
+        edgeColorFn: function (e) { return e.diff >= 0 ? EDGE_POS : EDGE_NEG; },
+        edgeLabelFn: function (e) { return fmtSigned(e.diff, 2) + starOf(e.pValue); },
+        edgeTitleFn: function (e) { return pretty(e.from) + " → " + pretty(e.to) + "  ·  High " + e.weightA.toFixed(3) + "  ·  Low " + e.weightB.toFixed(3) + "  ·  Δ " + fmtSigned(e.diff, 3) + "  ·  p=" + (e.pValue == null ? "—" : e.pValue.toFixed(3)); },
+      });
+      mount.insertAdjacentHTML("beforeend", '<div class="tna-legend small muted"><span><i style="background:' + EDGE_POS + '"></i> higher in ' + esc(cd.groupA.label) + "</span><span><i style=\"background:" + EDGE_NEG + '"></i> higher in ' + esc(cd.groupB.label) + "</span><span>width ∝ |Δ| · * p≤.05 ** ≤.01 *** ≤.001</span></div>");
+    }
+    cmpBySel.addEventListener("change", function () { st.cmpGroupBy = cmpBySel.value; });
+    container.querySelector("#tnaCmpBtn").addEventListener("click", function () {
+      st.cmpGroupBy = cmpBySel.value;
+      st.cmpIter = Math.max(100, Math.min(2000, parseInt(cmpIterIn.value, 10) || 500)); cmpIterIn.value = st.cmpIter;
+      cmpMount.innerHTML = '<div class="spin">Comparing cohorts…</div>';
+      ctx.loadCompare({ groupBy: st.cmpGroupBy, iter: st.cmpIter }).then(renderCompare).catch(function (e) { cmpMount.innerHTML = '<div class="empty">Comparison failed: ' + esc(e && e.message) + "</div>"; });
+    });
+
+    // Stability card is injected as part of the diagnostics HTML; wire its
+    // toggle / legend / chart now that it's in the DOM.
+    if (data.stability) wireStability(data.stability);
 
     // After a bootstrap run the whole view re-renders (scroll resets to top);
     // jump straight to the validation table the user just asked for.

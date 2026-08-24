@@ -17,6 +17,7 @@ const games = require("./games-analytics");
 const config = require("./config");
 const seq = require("./sequences");
 const tna = require("./tna");
+const pm = require("./process-mining");
 const predict = require("./predict");
 const importer = require("./import");
 
@@ -282,98 +283,17 @@ function mount(router) {
     });
   });
 
-  // ---- Process / sequence mining (game-agnostic) ----------------------------
-  // Derives process-mining artefacts from the raw event stream: trace variants
-  // (the distinct paths sessions take), a directly-follows graph, start/end
-  // activities and summary stats. Everything comes from (session_id, seq, type),
-  // so it works for any game in the suite.
+  // ---- Process / sequence mining (game-agnostic, ladyna) --------------------
+  // Derives process-mining artefacts from the session sequences via ladyna's
+  // validated processmining module: trace variants (the distinct paths sessions
+  // take), a directly-follows graph, activity stats and start/end activities.
+  // See process-mining.js.
   router.get("/games/:gameId/process", (req, res) => {
-    const gameId = String(req.params.gameId);
-    // One ordered activity sequence per session (bounded read; see sequences.js).
-    const { sessions, events: eventCount, truncated } = seq.fetchSequences(gameId, req.query);
-
-    // Activity frequency (across all events).
-    const actCount = {};
-    sessions.forEach((s) => s.forEach((t) => { actCount[t] = (actCount[t] || 0) + 1; }));
-    const activities = Object.keys(actCount).map((t) => ({ type: t, count: actCount[t] })).sort((a, b) => b.count - a.count);
-
-    // Directly-follows graph (self-loops included) + start/end activities.
-    // Key on a delimiter that can't occur in an activity name (types come from
-    // event.type), so multi-word activities survive. The old `a + "" + b` /
-    // split("") scheme mangled "animal_approached"→"identify" into "a"→"n".
-    // Shared with /tna via analytics-util so both key transitions identically.
-    const SEP = U.SEP;
-    const dfg = {}; let transTotal = 0, selfLoops = 0; const starts = {}, ends = {};
-    sessions.forEach((s) => {
-      starts[s[0]] = (starts[s[0]] || 0) + 1;
-      ends[s[s.length - 1]] = (ends[s[s.length - 1]] || 0) + 1;
-      for (let i = 1; i < s.length; i++) {
-        const k = s[i - 1] + SEP + s[i];
-        dfg[k] = (dfg[k] || 0) + 1; transTotal++;
-        if (s[i - 1] === s[i]) selfLoops++;
-      }
-    });
-    const transitions = Object.keys(dfg).map((k) => { const p = k.split(SEP); return { from: p[0], to: p[1], count: dfg[k] }; }).sort((a, b) => b.count - a.count);
-    const toList = (o) => Object.keys(o).map((k) => ({ type: k, count: o[k] })).sort((a, b) => b.count - a.count);
-
-    // Directly-follows chains of length N (self-loops included): how often a run
-    // of N consecutive activities occurs. Computed in-memory over the sequences
-    // we already fetched — 3- and 4-step add no DB work — and each list is capped
-    // so the response stays small. The frontend switches step length locally.
-    const DFG_STEPS = [2, 3, 4], DFG_TOP = 14;
-    const ngrams = (N) => {
-      const m = {};
-      sessions.forEach((s) => { for (let i = 0; i + N <= s.length; i++) { const k = s.slice(i, i + N).join(SEP); m[k] = (m[k] || 0) + 1; } });
-      return Object.keys(m).map((k) => ({ seq: k.split(SEP), count: m[k] })).sort((a, b) => b.count - a.count).slice(0, DFG_TOP);
-    };
-    const transitionsByN = {}; DFG_STEPS.forEach((N) => { transitionsByN[N] = ngrams(N); });
-
-    // Trace variants: fold repeated adjacent blocks (loops) down to a single
-    // pass — e.g. "A B C A B C A B C" -> "A B C" — so the loopy game logs
-    // collapse into the small set of structural paths sessions actually take.
-    const collapse = (s) => {
-      const a = s.slice(); let changed = true;
-      while (changed) {
-        changed = false;
-        const maxL = Math.min(6, Math.floor(a.length / 2));
-        for (let L = 1; L <= maxL && !changed; L++) {
-          for (let i = 0; i + 2 * L <= a.length; i++) {
-            let same = true;
-            for (let j = 0; j < L; j++) if (a[i + j] !== a[i + L + j]) { same = false; break; }
-            if (same) { a.splice(i + L, L); changed = true; break; }
-          }
-        }
-      }
-      return a;
-    };
-    const vmap = {};
-    sessions.forEach((s) => { const c = collapse(s); const key = c.join(""); if (!vmap[key]) vmap[key] = { sequence: c, count: 0 }; vmap[key].count++; });
-    const variants = Object.keys(vmap).map((k) => vmap[k]).sort((a, b) => b.count - a.count)
-      .map((v) => ({ sequence: v.sequence, count: v.count, coverage: sessions.length ? v.count / sessions.length : 0 }));
-
-    const avg = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
-    const rawLens = sessions.map((s) => s.length);
-    const colLens = sessions.map((s) => collapse(s).length);
-
-    res.json({
-      gameId,
-      stats: {
-        sessions: sessions.length,
-        events: eventCount,
-        variants: variants.length,
-        avgSteps: U.round(avg(colLens), 1),
-        avgEvents: U.round(avg(rawLens), 1),
-        selfLoopRate: transTotal ? U.round(selfLoops / transTotal, 3) : null,
-        distinctActivities: activities.length,
-        truncated,
-      },
-      activities,
-      variants: variants.slice(0, 12),
-      transitions: transitions.slice(0, 14),
-      transitionsByN,
-      startActivities: toList(starts).slice(0, 8),
-      endActivities: toList(ends).slice(0, 8),
-    });
+    try {
+      res.json(pm.compute(String(req.params.gameId), req.query));
+    } catch (e) {
+      res.status(500).json({ error: "process_failed", detail: String(e.message) });
+    }
   });
 
   // ---- Transition Network Analysis (game-agnostic) --------------------------
@@ -405,6 +325,26 @@ function mount(router) {
       res.json(tna.computeSequences(String(req.params.gameId), req.query));
     } catch (e) {
       res.status(500).json({ error: "sequences_failed", detail: String(e.message) });
+    }
+  });
+
+  // Behaviour patterns → outcome: frequent sequential patterns screened for
+  // association with a run outcome (score / stars / pass). See tna.js.
+  router.get("/games/:gameId/tna/patterns", (req, res) => {
+    try {
+      res.json(tna.computePatterns(String(req.params.gameId), req.query));
+    } catch (e) {
+      res.status(500).json({ error: "patterns_failed", detail: String(e.message) });
+    }
+  });
+
+  // Cohort comparison: two transition networks (high vs low on an outcome)
+  // compared edge-by-edge with a permutation test. See tna.js.
+  router.get("/games/:gameId/tna/compare", (req, res) => {
+    try {
+      res.json(tna.computeCompare(String(req.params.gameId), req.query));
+    } catch (e) {
+      res.status(500).json({ error: "compare_failed", detail: String(e.message) });
     }
   });
 

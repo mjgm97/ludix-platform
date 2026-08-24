@@ -42,4 +42,49 @@ function fetchSequences(gameId, query, capOverride) {
   return { sessions: sessions.filter((s) => s.length), events: rows.length, truncated };
 }
 
-module.exports = { fetchSequences };
+// Like fetchSequences, but keeps each session's id and joins its run outcome
+// (score / stars / level) from the scores table, honouring the same date/player
+// filters. Powers behaviour→outcome pattern mining and cohort comparison, where
+// a sequence must be paired with what the run achieved. Sessions without a score
+// row still appear (outcome null); order follows session_id.
+function fetchSequencesWithOutcomes(gameId, query, capOverride) {
+  const P = Object.assign({ g: gameId }, U.filterParams(query));
+  const eW = U.whereFor("e", query);
+  const eJ = U.joinFor("e", query);
+  const sW = U.whereFor("s", query);
+  const sJ = U.joinFor("s", query);
+  const cap = Math.max(1000, capOverride || config.processMaxEvents);
+
+  const rows = db.prepare(
+    `SELECT e.session_id AS sid, e.type AS type
+       FROM events e${eJ}
+      WHERE e.game_id=@g${eW}
+      ORDER BY e.session_id, e.seq, e.id
+      LIMIT @cap`
+  ).all(Object.assign({ cap: cap + 1 }, P));
+  const truncated = rows.length > cap;
+  if (truncated) rows.length = cap;
+
+  const seqBy = Object.create(null);
+  for (const r of rows) { (seqBy[r.sid] = seqBy[r.sid] || []).push(r.type == null ? "?" : String(r.type)); }
+
+  const srows = db.prepare(
+    `SELECT s.session_id AS sid, s.score AS score, s.stars AS stars, s.level AS level
+       FROM scores s${sJ}
+      WHERE s.game_id=@g AND s.session_id IS NOT NULL${sW}
+      ORDER BY s.created_at, s.id`
+  ).all(P);
+  const scoreBy = Object.create(null);
+  for (const r of srows) if (scoreBy[r.sid] == null) scoreBy[r.sid] = r;   // first run per session
+
+  const items = [];
+  for (const sid in seqBy) {
+    const s = seqBy[sid];
+    if (!s.length) continue;
+    const sc = scoreBy[sid];
+    items.push({ sid, seq: s, score: sc ? sc.score : null, stars: sc ? sc.stars : null, level: sc ? sc.level : null });
+  }
+  return { items, events: rows.length, truncated };
+}
+
+module.exports = { fetchSequences, fetchSequencesWithOutcomes };
