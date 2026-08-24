@@ -119,6 +119,18 @@
   input::placeholder{color:var(--muted2)}
   input:focus,select:focus,textarea:focus{border-color:var(--gold);box-shadow:var(--ring);background:#0b1322}
 
+  /* Unified selector — one styled <select> shared across the whole dashboard.
+     Native chevron is removed and replaced with a custom one so every dropdown
+     matches the inputs beside it (same height, radius, border, focus ring). */
+  select.usel{-webkit-appearance:none;-moz-appearance:none;appearance:none;cursor:pointer;
+    padding-right:36px;background-color:var(--bg2);
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%2393a4c9' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M2.75 4.5 6 7.75 9.25 4.5'/></svg>");
+    background-repeat:no-repeat;background-position:right 13px center;background-size:12px}
+  select.usel:hover{border-color:#33456b}
+  select.usel:focus{background-color:#0b1322}
+  select.usel::-ms-expand{display:none}
+  select.usel option{background:var(--bg2);color:var(--ink)}
+
   /* buttons */
   .btn{background:var(--grad);color:#0b1120;border:none;border-radius:11px;padding:11px 17px;font-weight:800;
     letter-spacing:.01em;transition:transform .12s,box-shadow .15s,filter .15s;box-shadow:0 8px 22px -10px rgba(255,213,74,.6)}
@@ -275,6 +287,9 @@
   tr.clickable:hover td:first-child{box-shadow:inset 3px 0 0 var(--gold)}
   .pill{display:inline-block;background:var(--bg2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:11.5px;color:var(--muted);font-weight:700}
   .pill.go{background:linear-gradient(120deg,#ffd54a1a,#4ad6a01a);border-color:#3a5c46;color:#a7e9c6}
+  .pill.warn{background:#2a230f;border-color:#6b4d1e;color:#ffd9a0}
+  .pill.bad{background:#2a1414;border-color:#6b2e2e;color:#ffb0b0}
+  .tna-sig-row{background:#ffd54a12}
   .bar-mini{height:7px;border-radius:4px;background:var(--line);position:relative;min-width:60px;overflow:hidden}
   .bar-mini>i{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:var(--green);
     transform-origin:left;animation:growx .6s cubic-bezier(.2,.8,.3,1)}
@@ -315,6 +330,12 @@
   .seqpill.sm{padding:4px 11px;font-size:12px;font-weight:700}
   @keyframes pillIn{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:scale(1)}}
   .seqarrow{color:var(--muted2);flex:none;font-size:15px;line-height:1;margin:0 1px}
+  .seqmore,.seqless{flex:none;cursor:pointer;background:var(--bg2);border:1px solid var(--line);border-radius:999px;
+    color:var(--muted);font:inherit;font-size:12px;font-weight:700;padding:4px 11px;white-space:nowrap;
+    transition:border-color .12s,color .12s,background .12s}
+  .seqmore:hover,.seqless:hover{border-color:var(--gold);color:var(--ink);background:#0b1322}
+  .seqrest{display:inline-flex;align-items:center;gap:7px}
+  .seqrest[hidden]{display:none}
   .seqrow{display:flex;align-items:center;gap:16px;padding:12px 4px;border-bottom:1px solid var(--line)}
   .seqrow:last-child{border-bottom:none}
   .seqrow:hover{background:#141f38;border-radius:10px}
@@ -350,8 +371,44 @@
   .tna-valctl input[type=number]{width:80px;padding:8px 10px}
   #tnaNet,.tna-cnet{position:relative;border:1px solid var(--line);border-radius:12px;background:radial-gradient(130% 130% at 50% 0%,#0e1830,#0a1120);overflow:hidden}
   /* Keep the main network compact — capped width, centred in its card. */
-  #tnaNet{max-width:700px;margin:0 auto}
+  #tnaNet,#tnaCmpBody .tna-svg{max-width:700px;margin:0 auto}
   .tna-svg{display:block;width:100%;height:auto;user-select:none;-webkit-user-select:none;touch-action:none}
+  /* graph/table view toggle + shared legends */
+  .tna-view-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+  .tna-view-actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .tna-legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;align-items:center}
+  .tna-legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+  .tna-legend-toggles{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 12px}
+  .tna-legend-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--bg2);color:var(--ink);border-radius:999px;padding:3px 11px;font-size:12px;font-weight:600;cursor:pointer}
+  .tna-legend-chip i{width:11px;height:11px;border-radius:50%}
+  .tna-legend-chip.off{opacity:.4;text-decoration:line-through}
+  .tna-legend-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:7px;vertical-align:-1px}
+  /* diverging pattern pyramid — single self-contained SVG (exportable).
+     Renders at its natural width; the wrapper scrolls if a long pattern makes it
+     wider than the card, and centres it when it fits. */
+  .tna-svg-wrap{width:100%;overflow-x:auto}
+  .tna-pyr-svg{display:block;margin:0 auto}
+  /* chart export control (added around every chart svg by export.js) */
+  .exp-wrap{position:relative}
+  .exp-ctrl{position:absolute;top:8px;right:8px;z-index:6}
+  .exp-btn{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;border:1px solid var(--line);
+    background:rgba(13,20,36,.7);color:var(--muted2);backdrop-filter:blur(6px);opacity:.28;transition:opacity .15s,color .15s,border-color .15s}
+  .exp-wrap:hover .exp-btn,.exp-ctrl.open .exp-btn{opacity:1}
+  .exp-btn:hover,.exp-ctrl.open .exp-btn{color:var(--ink);border-color:var(--green)}
+  .exp-menu{display:none;position:absolute;top:36px;right:0;width:210px;background:var(--panel2);
+    border:1px solid var(--line);border-radius:12px;padding:9px;box-shadow:var(--sh);}
+  .exp-ctrl.open .exp-menu{display:block}
+  .exp-menu-lbl{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--muted2);padding:7px 3px 5px}
+  .exp-seg{display:flex;gap:4px;background:var(--bg2);border:1px solid var(--line);border-radius:9px;padding:3px}
+  .exp-seg button{flex:1;background:none;border:0;color:var(--muted);padding:5px 4px;border-radius:7px;font:700 11.5px/1 inherit;cursor:pointer}
+  .exp-seg button.active{background:var(--elev);color:var(--ink);box-shadow:var(--sh-sm)}
+  .exp-res{display:flex;align-items:center;gap:8px}
+  .exp-w{width:88px;padding:7px 9px;font-size:12.5px;font-variant-numeric:tabular-nums}
+  .exp-dim{font-size:11px;color:var(--muted2);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .exp-actions{display:flex;flex-direction:column;gap:4px;margin-top:10px}
+  .exp-actions button{width:100%;text-align:center;background:var(--bg2);border:1px solid var(--line);color:var(--ink);
+    padding:8px 9px;border-radius:9px;font:700 12.5px/1 inherit;cursor:pointer;transition:.14s}
+  .exp-actions button:hover{border-color:var(--green);color:var(--ink);background:var(--elev)}
   .tna-svg text{font-family:inherit}
   .tna-svg .tna-nlabel{fill:var(--ink);font-size:12px;font-weight:800;paint-order:stroke;stroke:#0a1020;stroke-width:3.4px;stroke-linejoin:round}
   .tna-svg .tna-elabel{fill:var(--ink);font-size:11.5px;font-weight:800;font-variant-numeric:tabular-nums;paint-order:stroke;stroke:#0a1020;stroke-width:3px;stroke-linejoin:round}
@@ -384,7 +441,22 @@
   .tna-cluster{margin-bottom:0}
   .tna-cluster-top{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 8px;min-height:22px}
   .tna-cnet{margin-bottom:10px}
-  .tna-cseq-label{font-size:10.5px;color:var(--muted);font-weight:800;letter-spacing:.06em;text-transform:uppercase;margin:0 0 5px}
+  /* cluster tile: one header line, network sits on the card (no inner box) */
+  .tna-cl-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:0 0 10px}
+  .tna-cl-head b{font-size:15px;color:var(--ink);font-weight:800}
+  .tna-cl-meta{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+  .tna-cluster-net{position:relative;margin-bottom:12px}
+  /* cliques: one flat tile each (network + a single caption line), same modest
+     size regardless of count — no nested card/header/pill chrome */
+  .tna-clique-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,290px));gap:14px;justify-content:center}
+  .tna-clique{margin:0;background:radial-gradient(130% 130% at 50% 0%,#0e1830,#0a1120);border:1px solid var(--line);border-radius:14px;padding:6px 6px 0;overflow:hidden}
+  .tna-cq-net{position:relative}
+  .tna-cq-cap{display:flex;align-items:baseline;gap:9px;padding:5px 8px 9px;font-size:12px}
+  .tna-cq-cap b{color:var(--ink);font-weight:800}
+  .tna-cq-cap span{color:var(--muted);font-variant-numeric:tabular-nums}
+  .tna-cseq-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 5px}
+  .tna-cseq-label{font-size:10.5px;color:var(--muted);font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+  .tna-seqtog{padding:3px 10px;font-size:11px}
 
   /* ---- Prediction (SHAP) ---- */
   .seg .chip[disabled]{opacity:.32;cursor:not-allowed}
@@ -646,6 +718,9 @@
 
   <div id="modalRoot"></div>
 
+  <!-- Chart export (SVG/PNG). Self-initialises: observes #view and adds a
+       download control to every chart svg, current and future. -->
+  <script src="export.js"></script>
   <script src="app.js"></script>
   <!-- Transition Network Analysis renderer (Network tab). Registers
        window.SuiteTNA; app.js fetches /tna and hands it the data. -->

@@ -667,12 +667,20 @@
       var vrows = (d.variants || []).map(function (vr, ri) {
         var chain = vr.sequence, shown = chain.slice(0, cap);
         var ch = shown.map(function (t, i) { return (i ? '<span class="seqarrow">→</span>' : "") + pill(t); }).join("");
-        if (chain.length > cap) ch += '<span class="seqarrow">→</span><span class="muted small">+' + (chain.length - cap) + ' more</span>';
+        if (chain.length > cap) {
+          // Overflow steps live in the DOM but collapsed; a click reveals the
+          // full raw trace (and a "show less" folds it back).
+          var rest = chain.slice(cap).map(function (t) { return '<span class="seqarrow">→</span>' + pill(t); }).join("");
+          ch += '<span class="seqarrow seqmore-arrow">→</span>' +
+            '<button type="button" class="seqmore" aria-expanded="false">+' + (chain.length - cap) + ' more</button>' +
+            '<span class="seqrest" hidden>' + rest +
+            ' <button type="button" class="seqless">show less</button></span>';
+        }
         return '<div class="seqrow"><span class="seqrank">' + (ri + 1) + '</span><div class="seqchain">' + ch + '</div>' +
           '<div class="seqfreq"><div class="fbar"><i style="width:' + (vr.count / maxV * 100) + '%"></i></div>' +
           '<div class="fn">' + fmt(vr.count) + ' <small>· ' + pct(vr.coverage) + '</small></div></div></div>';
       }).join("");
-      html += card("Common event sequences", "The distinct paths sessions take through the game, ranked by how many sessions follow each. Repeated loops are folded to a single pass so structural paths stand out.",
+      html += card("Common event sequences", "The distinct paths sessions take through the game, ranked by how many sessions follow each (full raw traces, repeated loops are shown in full).",
         (d.variants && d.variants.length) ? vrows : '<p class="muted small">No sequences in range.</p>');
 
       // Directly-follows transitions + start/end activities.
@@ -719,6 +727,21 @@
           dfgBody.innerHTML = dfgRows(parseInt(b.getAttribute("data-n"), 10));
         });
       });
+
+      // Expand / collapse the truncated trace variants ("+N more" → full trace).
+      v.addEventListener("click", function (e) {
+        var chain = e.target.closest && e.target.closest(".seqchain");
+        if (!chain) return;
+        if (e.target.classList.contains("seqmore")) {
+          chain.querySelector(".seqmore-arrow").hidden = true;
+          e.target.hidden = true;
+          chain.querySelector(".seqrest").hidden = false;
+        } else if (e.target.classList.contains("seqless")) {
+          chain.querySelector(".seqrest").hidden = true;
+          chain.querySelector(".seqmore-arrow").hidden = false;
+          chain.querySelector(".seqmore").hidden = false;
+        }
+      });
     }).catch(errBox(v));
   }
 
@@ -726,7 +749,7 @@
   // View-local state persists across the module's local redraws and server
   // reloads (weight mode + validation are server-computed; threshold/labels are
   // display-only). It resets when you switch games so stale settings don't leak.
-  var tnaState = { game: null, weight: "probability", bootstrap: false, iter: 300, minWeight: 0, labels: true, k: 3, clAlgo: "kmeans", clDiss: "euclidean", clLink: "average" };
+  var tnaState = { game: null, weight: "probability", bootstrap: false, iter: 300, minWeight: 0, labels: true, k: 3, clAlgo: "pam", clDiss: "lv", clLink: "average", centMeasure: "betweenness", patOutcome: "score", patSupport: 0.1, cmpGroupBy: "score", cmpIter: 500, cmpView: "graph", cmpSigOnly: false, cliqueSize: 3, cliqueView: "graph", patView: "graph", stabView: "graph", stabHidden: {} };
   function renderTNA(v) {
     if (tnaState.game !== state.gameId) { tnaState.game = state.gameId; tnaState.bootstrap = false; tnaState.minWeight = 0; }
     if (!window.SuiteTNA) { v.innerHTML = '<div class="empty">Network module not loaded.</div>'; return; }
@@ -752,6 +775,22 @@
           return api("/games/" + g + "/tna/sequences" + qs({
             from: state.from, to: state.to, user: state.player,
             offset: o.offset, limit: o.limit,
+          }));
+        },
+        // Behaviour patterns → outcome (lazy; only when the user runs it).
+        loadPatterns: function (o) {
+          o = o || {};
+          return api("/games/" + g + "/tna/patterns" + qs({
+            from: state.from, to: state.to, user: state.player,
+            outcome: o.outcome, minSupport: o.minSupport,
+          }));
+        },
+        // Cohort comparison via permutation test (lazy).
+        loadCompare: function (o) {
+          o = o || {};
+          return api("/games/" + g + "/tna/compare" + qs({
+            from: state.from, to: state.to, user: state.player,
+            groupBy: o.groupBy, iter: o.iter,
           }));
         },
       });
@@ -868,7 +907,7 @@
       return api("/games/" + g + "/events" + qs({ from: state.from, to: state.to, user: state.player, type: evState.type, limit: evState.limit, offset: evState.offset, total: cachedTotal })).then(function (d) {
         evState.total = d.total;
         var html = '<div class="card"><div class="toolbar"><div class="grp"><label class="small muted">Event type</label> ' +
-          '<select id="evType"><option value="">all types</option>' + types.map(function (t) { return '<option ' + (evState.type === t ? "selected" : "") + '>' + esc(t) + '</option>'; }).join("") + '</select></div>' +
+          '<select class="usel" id="evType"><option value="">all types</option>' + types.map(function (t) { return '<option ' + (evState.type === t ? "selected" : "") + '>' + esc(t) + '</option>'; }).join("") + '</select></div>' +
           '<span class="spacer" style="flex:1"></span><span class="pill">' + fmt(d.total) + ' events</span></div>' +
           '<div class="tbl-wrap"><table><thead><tr><th>#</th><th>When</th><th>Player</th><th>Type</th><th>Lvl</th><th class="no-sort">Payload</th></tr></thead><tbody>' +
           (d.events.length ? d.events.map(function (e) {
@@ -1022,7 +1061,7 @@
           '<td class="imp-cname"><b>' + esc(c) + "</b></td>" +
           '<td><span class="t-badge t-' + ty + '">' + ty + "</span></td>" +
           '<td class="imp-samp">' + sampleChips(a, c) + "</td>" +
-          '<td><select class="imp-rolesel" data-col="' + esc(c) + '">' + roleOpts(role) + "</select></td></tr>";
+          '<td><select class="imp-rolesel usel" data-col="' + esc(c) + '">' + roleOpts(role) + "</select></td></tr>";
       }).join("");
 
       $("#impResult").innerHTML =
@@ -1231,9 +1270,20 @@
   // Toolkit exposed to per-game insight renderers (public/admin/games/<id>.js).
   // Each registers window.SuiteGameRenderers[gameId] = function(data, dash){...}
   // and returns an HTML string built with these helpers; charts mount on flush.
+  // Shared dropdown builder — the one unified `.usel` selector used everywhere.
+  // options: array of [value, label]; attrs: extra attributes string (optional).
+  function selectBox(id, options, cur, attrs) {
+    return '<select class="usel"' + (id ? ' id="' + id + '"' : "") + (attrs ? " " + attrs : "") + ">" +
+      (options || []).map(function (o) {
+        var val = String(o[0]);
+        return '<option value="' + esc(val) + '"' + (val === String(cur) ? " selected" : "") + ">" + esc(o[1]) + "</option>";
+      }).join("") + "</select>";
+  }
+
   var SuiteDash = {
     lineChart: lineChart, funnelChart: funnelChart, donutChart: donutChart, barChart: barChart,
     hBars: hBars, legendRow: legendRow, tile: tile, miniTile: miniTile, card: card,
+    selectBox: selectBox,
     esc: esc, fmt: fmt, pct: pct, dec: dec, COL: COL,
   };
   window.SuiteDash = SuiteDash;

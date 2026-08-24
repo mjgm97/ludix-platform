@@ -214,6 +214,22 @@ const GAMES = {
       const parts = iround(rnd(2, 4) + tr.exploration * 3);
       for (let i = 0; i < parts; i++) s.emit("place_component", { level, part: pick(["resistor", "battery", "led", "switch", "capacitor"]), index: i });
       s.emit("wire_nodes", { level, wires: parts + iround(rnd(0, 3)) });
+
+      // Illustrative CLIQUES: exploratory / persistent tinkerers roam among the
+      // bench tools in a varied order rather than running straight through, so
+      // these states become mutually reachable (edges in both directions). Across
+      // the cohort that makes {wire_nodes, run_simulation, debug_short,
+      // measure_voltage, reset_board} a tight routine — the Cliques view then
+      // surfaces 3-, 4- and 5-cliques on this game.
+      if (tr.exploration > 0.45 || tr.persistence > 0.55) {
+        const hub = ["wire_nodes", "run_simulation", "debug_short", "measure_voltage", "reset_board"];
+        const laps = 4 + iround(rnd(1, 3));
+        for (let lap = 0; lap < laps; lap++) {
+          const order = hub.slice().sort(() => Math.random() - 0.5);
+          order.forEach((a) => s.emit(a, { level, tinker: true }));
+        }
+      }
+
       let runs = 0, shorts = 0, completed = false;
       const maxRuns = tr.persistence < 0.4 ? 1 : tr.persistence > 0.72 ? 3 : 2;
       while (runs < maxRuns && !completed) {
