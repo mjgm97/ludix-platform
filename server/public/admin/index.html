@@ -395,13 +395,20 @@
     background:rgba(13,20,36,.7);color:var(--muted2);backdrop-filter:blur(6px);opacity:.28;transition:opacity .15s,color .15s,border-color .15s}
   .exp-wrap:hover .exp-btn,.exp-ctrl.open .exp-btn{opacity:1}
   .exp-btn:hover,.exp-ctrl.open .exp-btn{color:var(--ink);border-color:var(--green)}
-  .exp-menu{display:none;position:absolute;top:36px;right:0;min-width:172px;background:var(--panel2);
-    border:1px solid var(--line);border-radius:11px;padding:6px;box-shadow:var(--sh);}
+  .exp-menu{display:none;position:absolute;top:36px;right:0;width:210px;background:var(--panel2);
+    border:1px solid var(--line);border-radius:12px;padding:9px;box-shadow:var(--sh);}
   .exp-ctrl.open .exp-menu{display:block}
-  .exp-menu-lbl{font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted2);padding:6px 9px 3px}
-  .exp-menu button{display:block;width:100%;text-align:left;background:none;border:0;color:var(--ink);
-    padding:7px 9px;border-radius:8px;font:600 12.5px/1.2 inherit;font-variant-numeric:tabular-nums}
-  .exp-menu button:hover{background:var(--elev)}
+  .exp-menu-lbl{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--muted2);padding:7px 3px 5px}
+  .exp-seg{display:flex;gap:4px;background:var(--bg2);border:1px solid var(--line);border-radius:9px;padding:3px}
+  .exp-seg button{flex:1;background:none;border:0;color:var(--muted);padding:5px 4px;border-radius:7px;font:700 11.5px/1 inherit;cursor:pointer}
+  .exp-seg button.active{background:var(--elev);color:var(--ink);box-shadow:var(--sh-sm)}
+  .exp-res{display:flex;align-items:center;gap:8px}
+  .exp-w{width:88px;padding:7px 9px;font-size:12.5px;font-variant-numeric:tabular-nums}
+  .exp-dim{font-size:11px;color:var(--muted2);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .exp-actions{display:flex;flex-direction:column;gap:4px;margin-top:10px}
+  .exp-actions button{width:100%;text-align:center;background:var(--bg2);border:1px solid var(--line);color:var(--ink);
+    padding:8px 9px;border-radius:9px;font:700 12.5px/1 inherit;cursor:pointer;transition:.14s}
+  .exp-actions button:hover{border-color:var(--green);color:var(--ink);background:var(--elev)}
   .tna-svg text{font-family:inherit}
   .tna-svg .tna-nlabel{fill:var(--ink);font-size:12px;font-weight:800;paint-order:stroke;stroke:#0a1020;stroke-width:3.4px;stroke-linejoin:round}
   .tna-svg .tna-elabel{fill:var(--ink);font-size:11.5px;font-weight:800;font-variant-numeric:tabular-nums;paint-order:stroke;stroke:#0a1020;stroke-width:3px;stroke-linejoin:round}
