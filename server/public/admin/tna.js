@@ -130,6 +130,17 @@
       '<span class="small muted" id="tnaSeqRange"></span>' +
       '<button class="btn sm ghost" id="tnaSeqNext">Next →</button></div></div>';
 
+    // ---- Cliques (shown before clustering) ----------------------------------
+    var CLIQUE_SIZES = [[3, "Triangles"], [4, "4-cliques"], [5, "5-cliques"]];
+    html += '<div class="card"><div class="card-head"><h3>State cliques</h3><span class="pill">tight routines</span></div>' +
+      '<p class="cap">Groups of states that all transition into one another in <b>both</b> directions (mutual edges) — tightly-interlocked routines students loop through. Ranked by internal transition strength; the top ' + CLIQUE_TOP + ' are shown.</p>' +
+      '<div class="tna-controls" style="padding:2px 0 10px">' +
+      '<div class="tna-ctl"><label>Clique size</label><div class="seg sm" id="tnaCliqueSize">' +
+      CLIQUE_SIZES.map(function (o) { return '<button class="chip' + (o[0] === (st.cliqueSize || 3) ? " active" : "") + '" data-size="' + o[0] + '">' + esc(o[1]) + "</button>"; }).join("") +
+      "</div></div></div>" +
+      '<div class="tna-view-head" id="tnaCliqueHead"><div class="small muted" id="tnaCliqueMeta"></div><div class="tna-view-actions">' + viewSeg(st.cliqueView) + "</div></div>" +
+      '<div id="tnaCliques"></div></div>';
+
     // ---- Clustering ---------------------------------------------------------
     var selOpts = function (list, cur) { return list.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === cur ? " selected" : "") + ">" + esc(o[1]) + "</option>"; }).join(""); };
     var ALGOS = [["pam", "PAM (k-medoids)"], ["hierarchical", "Hierarchical"]];
@@ -146,15 +157,6 @@
       '<div class="tna-ctl push"><label>State labels</label><label class="tna-switch"><input type="checkbox" id="tnaClNodeLbl"' + (st.clNodeLabels !== false ? " checked" : "") + '><span>Show</span></label></div>' +
       '<div class="tna-ctl"><label>Edge labels</label><label class="tna-switch"><input type="checkbox" id="tnaClEdgeLbl"' + (st.clEdgeLabels !== false ? " checked" : "") + '><span>Show</span></label></div>' +
       '</div><div id="tnaClusters"></div></div>';
-
-    // ---- Cliques ------------------------------------------------------------
-    var CLIQUE_SIZES = [[3, "Triangles (3)"], [4, "4-cliques"], [5, "5-cliques"]];
-    html += '<div class="card"><div class="card-head"><h3>State cliques</h3><span class="pill">tight routines</span></div>' +
-      '<p class="cap">Groups of states that all transition into one another in <b>both</b> directions (mutual edges) — tightly-interlocked routines students loop through. Found by <b>ladyna</b> and ranked by internal transition strength; the top ' + CLIQUE_TOP + ' are shown.</p>' +
-      '<div class="tna-controls" style="padding:2px 0 10px">' +
-      '<div class="tna-ctl"><label>Clique size</label><select class="usel" id="tnaCliqueSize">' + selOpts(CLIQUE_SIZES, st.cliqueSize || 3) + "</select></div></div>" +
-      '<div class="tna-view-head" id="tnaCliqueHead"><div class="small muted" id="tnaCliqueMeta"></div><div class="tna-view-actions">' + viewSeg(st.cliqueView) + "</div></div>" +
-      '<div id="tnaCliques"></div></div>';
 
     // ---- Behaviour patterns → outcome --------------------------------------
     var OUTCOMES = [["score", "Score"], ["stars", "Stars"], ["pass", "Pass (median split)"]];
@@ -792,17 +794,25 @@
     }
     if (cliqueSizeSel) {
       renderCliques();
-      cliqueSizeSel.addEventListener("change", function () { st.cliqueSize = parseInt(cliqueSizeSel.value, 10); renderCliques(); });
+      [].forEach.call(cliqueSizeSel.querySelectorAll("[data-size]"), function (b) {
+        b.addEventListener("click", function () {
+          var sz = parseInt(b.getAttribute("data-size"), 10);
+          if (sz === st.cliqueSize) return;
+          st.cliqueSize = sz;
+          [].forEach.call(cliqueSizeSel.querySelectorAll("[data-size]"), function (x) { x.classList.toggle("active", x === b); });
+          renderCliques();
+        });
+      });
       wireViewToggle(cliqueHead, function () { return st.cliqueView; }, function (v) { st.cliqueView = v; renderCliques(); });
     }
 
     // Keep the last cluster payload + per-cluster drag positions so the label
     // toggles below can re-render locally (no re-fetch, no extra DB load).
-    var lastClusterData = null, clusterPos = {};
+    var lastClusterData = null, clusterPos = {}, seqExpanded = {};
     function renderClusters(cd) {
       // A fresh result (different object) resets drag positions; a label-toggle
       // re-render passes the same object and keeps whatever's been arranged.
-      if (cd && cd.clusters && cd !== lastClusterData) { lastClusterData = cd; clusterPos = {}; }
+      if (cd && cd.clusters && cd !== lastClusterData) { lastClusterData = cd; clusterPos = {}; seqExpanded = {}; }
       if (!cd || cd.error === "not_enough_sequences") {
         clusterMount.innerHTML = '<div class="empty">Not enough sessions to cluster — need at least ' + ((cd && cd.kRequested) || 2) + " sessions with transitions" + (cd ? " (have " + fmt(cd.usableSessions || 0) + ")" : "") + ".<br><span class=\"small\">Widen the date range or clear the player filter.</span></div>";
         return;
@@ -818,14 +828,33 @@
         (Q.sse != null ? " · SSE " + dec(Q.sse, 2) : "") + "</div>";
       var cards = cls.map(function (cl) {
         var top = cl.topStates.map(function (s2) { return chip(s2, 1); }).join(" ");
-        return '<div class="card tna-cluster"><div class="card-head"><h3>Cluster ' + cl.label + "</h3>" +
-          '<span class="pill go">' + fmt(cl.size) + " · " + pct(cl.share) + "</span><span class=\"spacer\"></span>" +
-          '<span class="small muted">' + cl.stats.states + " states · " + cl.stats.distinctTransitions + " edges</span></div>" +
+        // Flat tile: a single header line, the network on the card itself (no inner
+        // bordered box), then the sequences — matching the cliques treatment.
+        return '<div class="card tna-cluster"><div class="tna-cl-head"><b>Cluster ' + cl.label + "</b>" +
+          '<span class="tna-cl-meta">' + fmt(cl.size) + " runs · " + pct(cl.share) + "</span></div>" +
           '<div class="tna-cluster-top">' + top + "</div>" +
-          '<div class="tna-cnet" data-net="' + cl.label + '"></div>' +
-          '<div class="tna-cseq-label">Sequences</div><div class="tna-seq-wrap tna-cseq" data-seq="' + cl.label + '"></div></div>';
+          '<div class="tna-cluster-net" data-net="' + cl.label + '"></div>' +
+          '<div class="tna-cseq-head"><span class="tna-cseq-label">Sequences</span>' +
+          '<button type="button" class="seqmore tna-seqtog" data-seqtog="' + cl.label + '" hidden></button></div>' +
+          '<div class="tna-seq-wrap tna-cseq" data-seq="' + cl.label + '"></div></div>';
       }).join("");
       clusterMount.innerHTML = head + '<div class="grid2">' + cards + "</div>";
+      // Collapsed sequence rows per cluster; the toggle expands to show them all.
+      var SEQ_COLLAPSED = 14;
+      function drawClusterSeq(cl) {
+        var sm = clusterMount.querySelector('[data-seq="' + cl.label + '"]');
+        if (!sm) return;
+        var have = (cl.sequences || []).length, exp = !!seqExpanded[cl.label];
+        var rows = exp ? have : Math.min(SEQ_COLLAPSED, have);
+        // When expanded we show every session we have, so the "+N more" note is
+        // suppressed (total = shown); collapsed keeps the honest cluster total.
+        sm.innerHTML = seqSVG(cl.sequences, { total: exp ? have : cl.size, maxRows: rows, rowH: 9 });
+        var btn = clusterMount.querySelector('[data-seqtog="' + cl.label + '"]');
+        if (btn) {
+          if (have <= SEQ_COLLAPSED) { btn.hidden = true; }
+          else { btn.hidden = false; btn.textContent = exp ? "Show fewer" : "Show all " + fmt(have); }
+        }
+      }
       // Mount each cluster's network + sequence plot (shared colours + helpers).
       cls.forEach(function (cl) {
         var nm = clusterMount.querySelector('[data-net="' + cl.label + '"]');
@@ -833,8 +862,9 @@
           clusterPos[cl.label] = clusterPos[cl.label] || {};
           buildNetwork(nm, cl.nodes, cl.edges, { W: 520, H: 400, nodeLabels: st.clNodeLabels !== false, edgeLabels: st.clEdgeLabels !== false, edgeLabelMin: 0, weightMode: cd.weightMode, nodeR: 15, ringW: 4, posStore: clusterPos[cl.label] });
         }
-        var sm = clusterMount.querySelector('[data-seq="' + cl.label + '"]');
-        if (sm) sm.innerHTML = seqSVG(cl.sequences, { total: cl.size, maxRows: 14, rowH: 9 });
+        drawClusterSeq(cl);
+        var tog = clusterMount.querySelector('[data-seqtog="' + cl.label + '"]');
+        if (tog) tog.addEventListener("click", function () { seqExpanded[cl.label] = !seqExpanded[cl.label]; drawClusterSeq(cl); });
       });
     }
 

@@ -210,7 +210,7 @@ function describe(sessions, labels) {
 // dissimilarity (Hamming / Levenshtein / OSA / LCS / q-gram / Jaro–Winkler) is
 // clustered by PAM (k-medoids) or an agglomerative linkage, with a silhouette.
 const CLUSTER_MAX_SEQS = 1500;   // cap for the O(n²) dissimilarity matrix
-const SEQ_ROWS = 24, SEQ_LEN = 60;
+const SEQ_ROWS = 120, SEQ_LEN = 60;   // per-cluster sequences sent (client shows 14, expands to all)
 
 const DISSIMILARITIES = ["hamming", "lv", "osa", "dl", "lcs", "qgram", "jw"];
 const LINKAGES = ["average", "complete", "ward.D2", "single"];
