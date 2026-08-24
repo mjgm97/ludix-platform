@@ -82,6 +82,42 @@ function centrality(wModel, labels) {
   }));
 }
 
+// ---- Cliques (ladyna) -------------------------------------------------------
+// A clique is a set of states that all transition into one another in BOTH
+// directions (mutual edges) — a tightly-interlocked routine. ladyna.cliques finds
+// them per size; we rank each size by internal transition strength and attach the
+// probability sub-graph so the client can draw each one as its own mini-network.
+const CLIQUE_SIZES = [3, 4, 5];
+const CLIQUE_KEEP = 20;   // per size; the client shows the top handful of these
+function cliquesOf(M, sizes) {
+  const { labels, counts, probW } = M;
+  const out = {};
+  for (const size of sizes) {
+    let res = null;
+    try { res = L.cliques(M.prob, { size, threshold: 0 }); } catch (_) { res = null; }
+    const idxLists = (res && res.indices) || [];
+    const list = idxLists.map((idx) => {
+      const states = idx.map((i) => labels[i]);
+      const edges = [];
+      let strength = 0, n = 0;
+      for (let r = 0; r < idx.length; r++) {
+        for (let c = 0; c < idx.length; c++) {
+          if (r === c) continue;
+          const prob = probW.get(idx[r], idx[c]);
+          if (prob > 0) {
+            edges.push({ from: labels[idx[r]], to: labels[idx[c]], probability: U.round(prob, 4), count: counts.get(idx[r], idx[c]) });
+            strength += prob; n++;
+          }
+        }
+      }
+      return { states, edges, strength: U.round(strength, 4), meanWeight: U.round(n ? strength / n : 0, 4), size };
+    }).filter((c) => c.edges.length);
+    list.sort((a, b) => b.strength - a.strength);
+    out[size] = list.slice(0, CLIQUE_KEEP);
+  }
+  return out;
+}
+
 // ---- Bootstrap edge validation (ladyna) -------------------------------------
 // Resample sessions and report, per observed edge, the stability of its weight:
 // bootstrap mean, percentile CI bounds, a p-value (share of resamples where the
@@ -103,26 +139,6 @@ function bootstrap(wModel, opts) {
   }));
   const significant = edges.filter((e) => e.significant).length;
   return { iter, level, significant, total: edges.length, edges };
-}
-
-// ---- Community detection (ladyna) -------------------------------------------
-// Partitions the states into modules — groups of activities more tightly linked
-// to each other than to the rest. Cheap, so computed on every load; the state→
-// community map is attached to nodes and summarised as groups.
-function communitiesOf(model, labels) {
-  try {
-    const c = L.communities(model);
-    const key = Object.keys(c.assignments || {})[0];
-    const assign = key ? c.assignments[key] : [];
-    const byState = {};
-    labels.forEach((st, i) => { byState[st] = assign[i] != null ? assign[i] : 0; });
-    const groups = {};
-    labels.forEach((st) => { const g = byState[st]; (groups[g] = groups[g] || []).push(st); });
-    const summary = Object.keys(groups).map((g) => ({ id: +g, states: groups[g] })).sort((a, b) => a.id - b.id);
-    return { byState, summary, method: key || null, count: summary.length };
-  } catch (_) {
-    return { byState: {}, summary: [], method: null, count: 0 };
-  }
 }
 
 // ---- Markov order test (ladyna) ---------------------------------------------
@@ -472,7 +488,7 @@ function compute(gameId, query) {
     return {
       gameId, weightMode,
       stats: { sessions: 0, states: 0, transitions: 0, distinctTransitions: 0, events, selfLoops: 0, truncated },
-      nodes: [], edges: [], initial: [], centrality: [], communities: [], communityMethod: null,
+      nodes: [], edges: [], initial: [], centrality: [], cliques: {},
       sequences: [], sequencesTotal: 0, sequencesOffset: 0, sequencesLimit: SEQ_PAGE, seqLenCap: SEQ_LEN_CAP,
       validation: null, markov: null, stability: null,
     };
@@ -481,11 +497,8 @@ function compute(gameId, query) {
   const M = buildModels(sessions, weightMode);
   const edges = edgesFrom(M, weightMode).sort((a, b) => b.weight - a.weight);
   const cent = centrality(M.wModel, M.labels);
+  const cliques = cliquesOf(M, CLIQUE_SIZES);
   const { nodes, initial } = describe(sessions, M.labels);
-
-  // Community detection (cheap) — attach each state's module to its node.
-  const comm = communitiesOf(M.wModel, M.labels);
-  nodes.forEach((n) => { n.community = comm.byState[n.id] != null ? comm.byState[n.id] : 0; });
 
   // First page of the sequence index plot; the client pages through the rest
   // via /tna/sequences (see pageSequences / computeSequences).
@@ -513,8 +526,7 @@ function compute(gameId, query) {
       selfLoops: edges.filter((e) => e.from === e.to).reduce((a, e) => a + e.count, 0),
       truncated,
     },
-    nodes, edges, initial, centrality: cent,
-    communities: comm.summary, communityMethod: comm.method,
+    nodes, edges, initial, centrality: cent, cliques,
     sequences: seqPage.sequences, sequencesTotal: seqPage.sequencesTotal,
     sequencesOffset: seqPage.sequencesOffset, sequencesLimit: seqPage.sequencesLimit,
     seqLenCap: seqPage.seqLenCap,

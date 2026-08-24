@@ -27,12 +27,14 @@
     // the same activity keeps its colour across the graph, legend and index plot.
     var order = data.nodes.map(function (n) { return n.id; });
     var colorOf = {}; order.forEach(function (id, i) { colorOf[id] = PALETTE[i % PALETTE.length]; });
+    var nodeById = {}; data.nodes.forEach(function (n) { nodeById[n.id] = n; });
     function ink(hex) { var h = hex.replace("#", ""); if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2]; var r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16); return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.62 ? "#0b1120" : "#fff"; }
     function pretty(t) { return String(t).replace(/[_\-]+/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); }); }
     function chip(id, sm) { var c = colorOf[id] || COL.muted; return '<span class="tna-chip' + (sm ? " sm" : "") + '" style="background:' + c + ';color:' + ink(c) + '">' + esc(pretty(id)) + "</span>"; }
 
     // Shared bits for the graph/table views below.
     var EDGE_POS = "#3fa86a", EDGE_NEG = "#d0544e";   // signed diff edge colours (over/under in cohort A)
+    var CLIQUE_TOP = 10;   // how many top cliques (per size) to surface
     var STAB_COLORS = ["#5aa9ff", "#ff6b6b", "#4ad6a0", "#ffd54a", "#b18aff"];   // stability line per measure
     function stabColor(measures, m) { var i = measures.indexOf(m); return STAB_COLORS[(i < 0 ? 0 : i) % STAB_COLORS.length]; }
     function starOf(p) { return p == null ? "" : (p <= 0.001 ? "***" : p <= 0.01 ? "**" : p <= 0.05 ? "*" : ""); }
@@ -116,16 +118,9 @@
     var centMeasureOpts = CENT_MEASURES.map(function (m) { return '<option value="' + m[0] + '"' + (m[0] === (st.centMeasure || "betweenness") ? " selected" : "") + ">" + esc(m[1]) + "</option>"; }).join("");
     html += '<div class="card"><div class="card-head"><h3>Centrality comparison</h3>' +
       '<span class="spacer"></span><label class="small muted" style="display:flex;align-items:center;gap:8px">Measure' +
-      '<select id="tnaCentMeasure">' + centMeasureOpts + "</select></label></div>" +
+      '<select class="usel" id="tnaCentMeasure">' + centMeasureOpts + "</select></label></div>" +
       '<p class="cap">The selected centrality measure across every state, ranked — a direct side-by-side comparison to complement the table above. Colours match the network; hover a bar to isolate that activity’s transitions.</p>' +
       '<div id="tnaCentBars"></div></div>';
-
-    // ---- Communities --------------------------------------------------------
-    if (data.communities && data.communities.length > 1) {
-      html += '<div class="card"><div class="card-head"><h3>Communities</h3><span class="pill">' + data.communities.length + ' modules</span></div>' +
-        '<p class="cap">States partitioned into modules — groups of activities more tightly linked to each other than to the rest of the network (ladyna <code>' + esc(data.communityMethod || "community") + '</code>). Each module is a cluster of behaviour that tends to co-occur.</p>' +
-        '<div id="tnaComm"></div></div>';
-    }
 
     // ---- Sequence index plot (paginated) ------------------------------------
     html += '<div class="card"><div class="card-head"><h3>Sequence index plot</h3><span class="pill">' + fmt(data.sequencesTotal) + " sessions</span></div>" +
@@ -143,21 +138,30 @@
     html += '<div class="card"><div class="card-head"><h3>Clustering</h3><span class="pill">group sessions</span></div>' +
       '<p class="cap">Group sessions by how students move through the game, then compare each cluster’s transition network and sequences. Clustering is done by <b>ladyna</b> on a validated sequence dissimilarity (edit-distance family) via PAM or an agglomerative linkage. Colours match the legend above.</p>' +
       '<div class="tna-controls" style="padding:2px 0 8px">' +
-      '<div class="tna-ctl"><label>Algorithm</label><select id="tnaAlgo">' + selOpts(ALGOS, st.clAlgo || "pam") + "</select></div>" +
-      '<div class="tna-ctl" id="tnaDissCtl"><label>Dissimilarity</label><select id="tnaDiss">' + selOpts(DISS, st.clDiss || "lv") + "</select></div>" +
-      '<div class="tna-ctl" id="tnaLinkCtl"><label>Linkage</label><select id="tnaLink">' + selOpts(LINKS, st.clLink || "average") + "</select></div>" +
+      '<div class="tna-ctl"><label>Algorithm</label><select class="usel" id="tnaAlgo">' + selOpts(ALGOS, st.clAlgo || "pam") + "</select></div>" +
+      '<div class="tna-ctl" id="tnaDissCtl"><label>Dissimilarity</label><select class="usel" id="tnaDiss">' + selOpts(DISS, st.clDiss || "lv") + "</select></div>" +
+      '<div class="tna-ctl" id="tnaLinkCtl"><label>Linkage</label><select class="usel" id="tnaLink">' + selOpts(LINKS, st.clLink || "average") + "</select></div>" +
       '<div class="tna-ctl"><label>Clusters (k)</label><input type="number" id="tnaK" min="2" max="8" step="1" value="' + (st.k || 3) + '" style="width:74px"></div>' +
       '<div class="tna-ctl"><label>&nbsp;</label><button class="btn sm" id="tnaClusterBtn">Run clustering</button></div>' +
       '<div class="tna-ctl push"><label>State labels</label><label class="tna-switch"><input type="checkbox" id="tnaClNodeLbl"' + (st.clNodeLabels !== false ? " checked" : "") + '><span>Show</span></label></div>' +
       '<div class="tna-ctl"><label>Edge labels</label><label class="tna-switch"><input type="checkbox" id="tnaClEdgeLbl"' + (st.clEdgeLabels !== false ? " checked" : "") + '><span>Show</span></label></div>' +
       '</div><div id="tnaClusters"></div></div>';
 
+    // ---- Cliques ------------------------------------------------------------
+    var CLIQUE_SIZES = [[3, "Triangles (3)"], [4, "4-cliques"], [5, "5-cliques"]];
+    html += '<div class="card"><div class="card-head"><h3>State cliques</h3><span class="pill">tight routines</span></div>' +
+      '<p class="cap">Groups of states that all transition into one another in <b>both</b> directions (mutual edges) — tightly-interlocked routines students loop through. Found by <b>ladyna</b> and ranked by internal transition strength; the top ' + CLIQUE_TOP + ' are shown.</p>' +
+      '<div class="tna-controls" style="padding:2px 0 10px">' +
+      '<div class="tna-ctl"><label>Clique size</label><select class="usel" id="tnaCliqueSize">' + selOpts(CLIQUE_SIZES, st.cliqueSize || 3) + "</select></div></div>" +
+      '<div class="tna-view-head" id="tnaCliqueHead"><div class="small muted" id="tnaCliqueMeta"></div><div class="tna-view-actions">' + viewSeg(st.cliqueView) + "</div></div>" +
+      '<div id="tnaCliques"></div></div>';
+
     // ---- Behaviour patterns → outcome --------------------------------------
     var OUTCOMES = [["score", "Score"], ["stars", "Stars"], ["pass", "Pass (median split)"]];
     html += '<div class="card"><div class="card-head"><h3>Behaviour patterns → outcome</h3><span class="pill">what predicts success</span></div>' +
       '<p class="cap">ladyna mines frequent sequential patterns and screens each for association with a run outcome. For Score/Stars the effect is the change in the outcome when the pattern is present (OLS); for Pass it is the log-odds (logistic). Adjusted p-values use Benjamini–Hochberg.</p>' +
       '<div class="tna-controls" style="padding:2px 0 8px">' +
-      '<div class="tna-ctl"><label>Outcome</label><select id="tnaPatOutcome">' + selOpts(OUTCOMES, st.patOutcome || "score") + "</select></div>" +
+      '<div class="tna-ctl"><label>Outcome</label><select class="usel" id="tnaPatOutcome">' + selOpts(OUTCOMES, st.patOutcome || "score") + "</select></div>" +
       '<div class="tna-ctl"><label>Min support</label><input type="number" id="tnaPatSupport" min="0.02" max="0.9" step="0.02" value="' + (st.patSupport || 0.1) + '" style="width:82px"></div>' +
       '<div class="tna-ctl"><label>&nbsp;</label><button class="btn sm" id="tnaPatBtn">Mine patterns</button></div>' +
       '</div><div id="tnaPatterns"></div></div>';
@@ -167,7 +171,7 @@
     html += '<div class="card"><div class="card-head"><h3>Cohort comparison</h3><span class="pill">high vs low</span></div>' +
       '<p class="cap">Splits sessions into two cohorts by a median split on an outcome, builds a transition network for each over a shared state set, and compares them edge-by-edge with a permutation test (ladyna). A significant edge is one whose transition probability differs between high and low performers.</p>' +
       '<div class="tna-controls" style="padding:2px 0 8px">' +
-      '<div class="tna-ctl"><label>Split by</label><select id="tnaCmpBy">' + selOpts(CMPBY, st.cmpGroupBy || "score") + "</select></div>" +
+      '<div class="tna-ctl"><label>Split by</label><select class="usel" id="tnaCmpBy">' + selOpts(CMPBY, st.cmpGroupBy || "score") + "</select></div>" +
       '<div class="tna-ctl"><label>Iterations</label><input type="number" id="tnaCmpIter" min="100" max="2000" step="100" value="' + (st.cmpIter || 500) + '" style="width:90px"></div>' +
       '<div class="tna-ctl"><label>&nbsp;</label><button class="btn sm" id="tnaCmpBtn">Compare cohorts</button></div>' +
       '</div><div id="tnaCompare"></div></div>';
@@ -532,16 +536,6 @@
     centMeasureSel.addEventListener("change", function () { st.centMeasure = centMeasureSel.value; drawCentBars(); });
     drawCentBars();
 
-    // ---- Communities (state modules, coloured chips per group) --------------
-    var commMount = container.querySelector("#tnaComm");
-    if (commMount && data.communities && data.communities.length) {
-      commMount.innerHTML = '<div style="display:flex;flex-direction:column;gap:12px">' + data.communities.map(function (grp) {
-        return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
-          '<span class="pill" style="min-width:78px">Module ' + (grp.id + 1) + "</span>" +
-          grp.states.map(function (s2) { return chip(s2, 1); }).join(" ") + "</div>";
-      }).join("") + "</div>";
-    }
-
     // ---- Sequence index plot (paginated, uses shared hardened seqSVG) ------
     // The initial page ships with the /tna payload; Prev/Next fetch adjacent
     // pages from /tna/sequences (order is stable, so offsets line up). The card
@@ -745,6 +739,63 @@
     container.querySelector("#tnaClNodeLbl").addEventListener("change", function () { st.clNodeLabels = this.checked; if (lastClusterData) renderClusters(lastClusterData); });
     container.querySelector("#tnaClEdgeLbl").addEventListener("change", function () { st.clEdgeLabels = this.checked; if (lastClusterData) renderClusters(lastClusterData); });
 
+    // ---- Cliques (ships with the /tna payload; no lazy fetch) --------------
+    var cliqueMount = container.querySelector("#tnaCliques");
+    var cliqueSizeSel = container.querySelector("#tnaCliqueSize");
+    var cliqueHead = container.querySelector("#tnaCliqueHead");
+    var cliquePos = {};   // drag positions per size/rank, kept across view toggles
+    function renderCliques() {
+      if (!cliqueMount) return;
+      var size = st.cliqueSize || 3;
+      var all = (data.cliques && data.cliques[size]) || [];
+      var top = all.slice(0, CLIQUE_TOP);
+      var meta = container.querySelector("#tnaCliqueMeta");
+      if (meta) meta.innerHTML = all.length ? "<b style=\"color:var(--ink)\">" + fmt(all.length) + "</b> clique" + (all.length === 1 ? "" : "s") + " of size " + size + (all.length > top.length ? " · showing top " + top.length : "") : "";
+      if (!top.length) {
+        cliqueMount.innerHTML = '<p class="muted small">No cliques of size ' + size + " — no group of " + size + " states all transition into one another here. Try a smaller size.</p>";
+        return;
+      }
+      if (st.cliqueView === "table") cliqueMount.innerHTML = cliqueTableHTML(top);
+      else drawCliqueGraphs(top, size);
+    }
+    function cliqueTableHTML(rows) {
+      return '<div class="tbl-wrap"><table><thead><tr><th class="no-sort">#</th><th class="no-sort">States (mutually connected)</th><th class="num">Mean prob.</th><th class="num">Strength</th></tr></thead><tbody>' +
+        rows.map(function (c, i) {
+          return "<tr><td class=\"num\">" + (i + 1) + '</td><td><div class="seqchain">' + c.states.map(function (s2) { return chip(s2, 1); }).join(" ") + "</div></td>" +
+            '<td class="num">' + dec(c.meanWeight, 3) + '</td><td class="num">' + dec(c.strength, 3) + "</td></tr>";
+        }).join("") + "</tbody></table></div>";
+    }
+    function drawCliqueGraphs(rows, size) {
+      cliquePos[size] = cliquePos[size] || {};
+      // One flat tile per clique: just the network + a single caption line. No
+      // nested card/header/pill chrome — the size selector already states the size.
+      var cards = rows.map(function (c, i) {
+        return '<figure class="tna-clique"><div class="tna-cq-net" data-cq="' + i + '"></div>' +
+          '<figcaption class="tna-cq-cap"><b>#' + (i + 1) + "</b><span>strength " + dec(c.strength, 2) + "</span></figcaption></figure>";
+      }).join("");
+      // Fixed-track grid so each clique renders at the SAME modest size no matter
+      // how many there are (a lone clique no longer stretches to full width).
+      cliqueMount.innerHTML = '<div class="tna-clique-grid">' + cards + "</div>";
+      rows.forEach(function (c, i) {
+        var nm = cliqueMount.querySelector('[data-cq="' + i + '"]');
+        if (!nm) return;
+        cliquePos[size][i] = cliquePos[size][i] || {};
+        var nodes = c.states.map(function (l) { var g = nodeById[l]; return { id: l, frequency: g ? g.frequency : 0, initial: 0 }; });
+        buildNetwork(nm, nodes, c.edges, {
+          W: 340, H: 300, nodeLabels: true, edgeLabels: true, edgeLabelMin: 0, weightMode: "probability",
+          nodeR: 17, ringW: 0, posStore: cliquePos[size][i],
+          edgeMag: function (e) { return e.probability; },
+          edgeLabelFn: function (e) { return (Math.round(e.probability * 100) / 100).toFixed(2).replace(/^0(?=\.)/, ""); },
+          edgeTitleFn: function (e) { return pretty(e.from) + " → " + pretty(e.to) + "  ·  p=" + e.probability.toFixed(3) + "  ·  n=" + e.count; },
+        });
+      });
+    }
+    if (cliqueSizeSel) {
+      renderCliques();
+      cliqueSizeSel.addEventListener("change", function () { st.cliqueSize = parseInt(cliqueSizeSel.value, 10); renderCliques(); });
+      wireViewToggle(cliqueHead, function () { return st.cliqueView; }, function (v) { st.cliqueView = v; renderCliques(); });
+    }
+
     // Keep the last cluster payload + per-cluster drag positions so the label
     // toggles below can re-render locally (no re-fetch, no extra DB load).
     var lastClusterData = null, clusterPos = {};
@@ -798,7 +849,7 @@
     function pTxt(v) { return v == null ? "—" : (v < 0.001 ? "<0.001" : dec(v, 3)); }
     // Diverging colour by standardized residual: blue = over-represented in the
     // High cohort, red = over-represented in the Low cohort (intensity ∝ |resid|).
-    function residColor(r) { var mag = Math.min(1, Math.abs(r) / 5); var base = r >= 0 ? "90,169,255" : "224,84,78"; return "rgba(" + base + "," + (0.3 + 0.6 * mag).toFixed(2) + ")"; }
+    function residColor(r) { var mag = Math.min(1, Math.abs(r) / 5); var base = r >= 0 ? "125,192,255" : "255,124,120"; return "rgba(" + base + "," + (0.58 + 0.4 * mag).toFixed(2) + ")"; }
 
     function renderPatterns(pd) {
       if (!pd || pd.error) {
@@ -816,7 +867,7 @@
       var body = patMount.querySelector("#tnaPatBody");
       var rows = pd.patterns || [];
       if (!rows.length) { body.innerHTML = '<p class="muted small">No patterns at this support threshold — lower Min support.</p>'; return; }
-      body.innerHTML = st.patView === "table" ? patternTableHTML(rows) : pyramidHTML(pd, rows);
+      body.innerHTML = st.patView === "table" ? patternTableHTML(rows) : pyramidSVG(pd, rows);
     }
     function patternTableHTML(rows) {
       return '<div class="tbl-wrap"><table><thead><tr><th class="no-sort">Pattern</th><th class="num">Support</th><th class="num">High n</th><th class="num">Low n</th><th class="num">Std. resid.</th><th class="num">p</th><th class="no-sort">Sig</th></tr></thead><tbody>' +
@@ -828,24 +879,82 @@
             "<td>" + (r.significant ? '<span class="tna-sig">✓</span>' : '<span class="muted">·</span>') + "</td></tr>";
         }).join("") + "</tbody></table></div>";
     }
-    // Diverging pyramid: High cohort bars grow left, Low cohort right, each scaled
-    // to the largest proportion, coloured by the standardized residual.
-    function pyramidHTML(pd, rows) {
+    // Text measurement (offscreen canvas) so SVG chips can be laid out and clipped
+    // to a fixed column without ever overflowing.
+    var _measCtx = null;
+    function textW(str, font) {
+      if (!_measCtx) _measCtx = document.createElement("canvas").getContext("2d");
+      _measCtx.font = font; return _measCtx.measureText(String(str)).width;
+    }
+    var CHIP_FONT = "800 11px Nunito, system-ui, sans-serif";
+    var CHIP_PADX = 8, CHIP_ARROW = 13, CHIP_GAP = 4;
+    // Width a full (untruncated) chip row needs — used to size the label column.
+    function chipRowWidth(pattern) {
+      var evs = String(pattern).split("->"), w = 0;
+      for (var i = 0; i < evs.length; i++) {
+        if (i) w += CHIP_ARROW + CHIP_GAP;
+        w += textW(pretty(evs[i].trim()), CHIP_FONT) + CHIP_PADX * 2;
+      }
+      return w;
+    }
+    // Render a pattern (state chain) as SVG chips in FULL — nothing is truncated;
+    // the column is sized to fit the longest pattern and the whole plot scrolls.
+    function patternChipsSVG(pattern, x, cy) {
+      var evs = String(pattern).split("->").map(function (e) { return e.trim(); });
+      var h = 18, hy = cy - h / 2, ty = cy + 4, out = "", cx = x, i;
+      for (i = 0; i < evs.length; i++) {
+        if (i) { out += '<text x="' + (cx + CHIP_ARROW / 2).toFixed(1) + '" y="' + ty.toFixed(1) + '" text-anchor="middle" fill="#63718f" font-size="12">→</text>'; cx += CHIP_ARROW; }
+        var lbl = pretty(evs[i]), w = textW(lbl, CHIP_FONT) + CHIP_PADX * 2, col = colorOf[evs[i]] || COL.muted;
+        out += '<rect x="' + cx.toFixed(1) + '" y="' + hy.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + h + '" rx="9" fill="' + col + '"/>' +
+          '<text x="' + (cx + w / 2).toFixed(1) + '" y="' + ty.toFixed(1) + '" text-anchor="middle" fill="' + ink(col) + '" font-size="11" font-weight="800">' + esc(lbl) + "</text>";
+        cx += w + CHIP_GAP;
+      }
+      return out;
+    }
+    // Diverging tornado plot as ONE self-contained SVG (exportable). The bar block
+    // sits on the LEFT and is always visible (High grows left, Low grows right,
+    // scaled to the largest share, coloured by the standardized residual); the full
+    // pattern label sits to its RIGHT. The plot renders at natural width and the
+    // wrapper scrolls horizontally when a long label makes it wider than the card,
+    // so nothing is ever truncated and the bars stay on screen.
+    function pyramidSVG(pd, rows) {
       var top = rows.slice(0, 16);
       var maxP = top.reduce(function (m, r) { return Math.max(m, r.propHigh, r.propLow); }, 0.0001);
-      var head = '<div class="pyr-axis small muted"><span>← ' + esc(pd.groupA.label) + '</span><span>' + esc(pd.groupB.label) + " →</span></div>";
-      var body = top.map(function (r) {
-        var wH = (r.propHigh / maxP * 100).toFixed(1), wL = (r.propLow / maxP * 100).toFixed(1);
+      var LW = Math.ceil(top.reduce(function (m, r) { return Math.max(m, chipRowWidth(r.pattern)); }, 120)) + 6;
+      var rowH = 30, barH = 16, headH = 30, legH = 26, padB = 6, padL = 4, gap = 22, barsW = 470, padR = 14;
+      var cx = padL + barsW / 2, labelX = padL + barsW + gap, W = labelX + LW + padR;
+      var H = headH + top.length * rowH + legH + padB;
+      var midHalf = 15, nGap = 34, maxBar = barsW / 2 - midHalf - nGap;
+      var MUT = "#93a4c9";
+      var s = '<svg viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '" class="tna-pyr-svg" preserveAspectRatio="xMinYMin meet" xmlns="http://www.w3.org/2000/svg" font-family="Nunito, system-ui, sans-serif">';
+      s += '<line x1="' + cx + '" y1="' + (headH - 8) + '" x2="' + cx + '" y2="' + (headH + top.length * rowH) + '" stroke="#25324e" stroke-width="1"/>';
+      s += '<text x="' + (cx - midHalf - 4) + '" y="18" text-anchor="end" fill="' + MUT + '" font-size="11" font-weight="800">← ' + esc(pd.groupA.label) + "</text>";
+      s += '<text x="' + (cx + midHalf + 4) + '" y="18" text-anchor="start" fill="' + MUT + '" font-size="11" font-weight="800">' + esc(pd.groupB.label) + " →</text>";
+      s += '<text x="' + labelX + '" y="18" text-anchor="start" fill="' + MUT + '" font-size="10.5" font-weight="800" letter-spacing=".04em">PATTERN</text>';
+      top.forEach(function (r, i) {
+        var y = headH + i * rowH, by = y + (rowH - barH) / 2, ty = by + barH * 0.72;
+        var hw = r.propHigh / maxP * maxBar, lw = r.propLow / maxP * maxBar;
         var star = starOf(r.p) || (r.p != null && r.p <= 0.05 ? "*" : "");
-        return '<div class="pyr-row"><div class="pyr-label" title="' + esc(r.pattern) + '">' + patternChips(r.pattern) + "</div>" +
-          '<div class="pyr-bars">' +
-            '<div class="pyr-side pyr-left"><span class="pyr-n">' + fmt(r.countHigh) + '</span><i style="width:' + wH + "%;background:" + residColor(r.stdResid) + '"></i></div>' +
-            '<div class="pyr-mid" title="std. residual ' + fmtSigned(r.stdResid, 2) + " · p " + pTxt(r.p) + '">' + (star || "·") + "</div>" +
-            '<div class="pyr-side pyr-right"><i style="width:' + wL + "%;background:" + residColor(-r.stdResid) + '"></i><span class="pyr-n">' + fmt(r.countLow) + "</span></div>" +
-          "</div></div>";
-      }).join("");
-      var legend = '<div class="tna-legend small muted"><span><i style="background:' + residColor(3) + '"></i> over-represented in ' + esc(pd.groupA.label) + "</span><span><i style=\"background:" + residColor(-3) + '"></i> over-represented in ' + esc(pd.groupB.label) + "</span><span>bar ∝ share of cohort · * p≤.05</span></div>";
-      return '<div class="tna-pyramid">' + head + body + "</div>" + legend;
+        s += "<g><title>" + esc(r.pattern) + "  ·  " + esc(pd.groupA.label) + " " + fmt(r.countHigh) + " (" + pct(r.propHigh) + ")  ·  " + esc(pd.groupB.label) + " " + fmt(r.countLow) + " (" + pct(r.propLow) + ")  ·  std. resid " + fmtSigned(r.stdResid, 2) + "  ·  p " + pTxt(r.p) + "</title>";
+        var hRight = cx - midHalf;
+        if (hw > 0.5) s += '<rect x="' + (hRight - hw).toFixed(1) + '" y="' + by + '" width="' + hw.toFixed(1) + '" height="' + barH + '" rx="3" fill="' + residColor(r.stdResid) + '"/>';
+        s += '<text x="' + (hRight - hw - 5).toFixed(1) + '" y="' + ty.toFixed(1) + '" text-anchor="end" fill="' + MUT + '" font-size="10.5">' + fmt(r.countHigh) + "</text>";
+        var lLeft = cx + midHalf;
+        if (lw > 0.5) s += '<rect x="' + lLeft + '" y="' + by + '" width="' + lw.toFixed(1) + '" height="' + barH + '" rx="3" fill="' + residColor(-r.stdResid) + '"/>';
+        s += '<text x="' + (lLeft + lw + 5).toFixed(1) + '" y="' + ty.toFixed(1) + '" text-anchor="start" fill="' + MUT + '" font-size="10.5">' + fmt(r.countLow) + "</text>";
+        s += '<text x="' + cx + '" y="' + ty.toFixed(1) + '" text-anchor="middle" fill="' + MUT + '" font-size="12" font-weight="800">' + (star || "·") + "</text>";
+        s += patternChipsSVG(r.pattern, labelX, y + rowH / 2);
+        s += "</g>";
+      });
+      var ly = headH + top.length * rowH + 17;
+      var t1 = "over-represented in " + pd.groupA.label, legFont = "400 11px Nunito, system-ui, sans-serif";
+      s += '<rect x="' + padL + '" y="' + (ly - 9) + '" width="11" height="11" rx="2" fill="' + residColor(3) + '"/>' +
+        '<text x="' + (padL + 16) + '" y="' + ly + '" fill="' + MUT + '" font-size="11">' + esc(t1) + "</text>";
+      var x2 = padL + 16 + textW(t1, legFont) + 26;
+      s += '<rect x="' + x2 + '" y="' + (ly - 9) + '" width="11" height="11" rx="2" fill="' + residColor(-3) + '"/>' +
+        '<text x="' + (x2 + 16) + '" y="' + ly + '" fill="' + MUT + '" font-size="11">' + esc("over-represented in " + pd.groupB.label) + "</text>";
+      s += "</svg>";
+      return '<div class="tna-svg-wrap">' + s + "</div>";
     }
     patOutcomeSel.addEventListener("change", function () { st.patOutcome = patOutcomeSel.value; });
     container.querySelector("#tnaPatBtn").addEventListener("click", function () {
@@ -869,16 +978,25 @@
       }
       cmpPos = {};
       var head = '<div class="small muted"><b style="color:var(--ink)">' + esc(cd.groupA.label) + "</b> (" + fmt(cd.groupA.size) + ') vs <b style="color:var(--ink)">' + esc(cd.groupB.label) + "</b> (" + fmt(cd.groupB.size) + ") · " + cd.significant + " / " + cd.total + " edges differ · " + fmt(cd.iter) + " permutations</div>";
-      cmpMount.innerHTML = '<div class="tna-view-head">' + head + viewSeg(st.cmpView) + '</div><div id="tnaCmpBody"></div>';
+      var actions = '<div class="tna-view-actions">' +
+        '<label class="tna-switch"><input type="checkbox" id="tnaCmpSig"' + (st.cmpSigOnly ? " checked" : "") + '><span>Significant only</span></label>' +
+        viewSeg(st.cmpView) + '</div>';
+      cmpMount.innerHTML = '<div class="tna-view-head">' + head + actions + '</div><div id="tnaCmpBody"></div>';
       wireViewToggle(cmpMount, function () { return st.cmpView; }, function (v) { st.cmpView = v; drawCmpBody(cd); });
+      var sigTog = cmpMount.querySelector("#tnaCmpSig");
+      if (sigTog) sigTog.addEventListener("change", function () { st.cmpSigOnly = sigTog.checked; drawCmpBody(cd); });
       drawCmpBody(cd);
     }
     function drawCmpBody(cd) {
       var body = cmpMount.querySelector("#tnaCmpBody");
       var rows = cd.edges || [];
-      if (!rows.length) { body.innerHTML = '<p class="muted small">No shared transitions to compare.</p>'; return; }
+      if (st.cmpSigOnly) rows = rows.filter(function (e) { return e.significant; });
+      if (!rows.length) {
+        body.innerHTML = '<p class="muted small">' + (st.cmpSigOnly && (cd.edges || []).length ? "No significant edges — none of the transitions differ at p ≤ .05." : "No shared transitions to compare.") + "</p>";
+        return;
+      }
       if (st.cmpView === "table") { body.innerHTML = compareTableHTML(rows); return; }
-      drawDiffNetwork(body, cd);
+      drawDiffNetwork(body, cd, rows);
     }
     function compareTableHTML(rows) {
       return '<div class="tbl-wrap"><table><thead><tr><th class="no-sort">From</th><th class="no-sort">To</th><th class="num">High</th><th class="num">Low</th><th class="num">Δ (H−L)</th><th class="num">Effect</th><th class="num">p</th><th class="no-sort">Sig</th></tr></thead><tbody>' +
@@ -892,9 +1010,13 @@
     }
     // Cohort-difference network: same renderer as the main graph, but edges are
     // coloured by which cohort favours them and labelled with Δ + significance.
-    function drawDiffNetwork(mount, cd) {
-      var nodes = cd.labels.map(function (l) { return { id: l, frequency: 0, initial: 0 }; });
-      buildNetwork(mount, nodes, cd.edges, {
+    function drawDiffNetwork(mount, cd, edges) {
+      edges = edges || cd.edges;
+      // Only keep states that still touch a shown edge (avoids stray nodes when
+      // the "significant only" filter drops most transitions).
+      var used = {}; edges.forEach(function (e) { used[e.from] = used[e.to] = 1; });
+      var nodes = cd.labels.filter(function (l) { return used[l]; }).map(function (l) { return { id: l, frequency: 0, initial: 0 }; });
+      buildNetwork(mount, nodes, edges, {
         W: 750, H: 600, minWeight: 0, nodeLabels: true, edgeLabels: true, posStore: cmpPos,
         edgeMag: function (e) { return Math.abs(e.diff) || 1e-6; },
         edgeColorFn: function (e) { return e.diff >= 0 ? EDGE_POS : EDGE_NEG; },
