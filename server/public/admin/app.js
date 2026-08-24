@@ -672,7 +672,7 @@
           '<div class="seqfreq"><div class="fbar"><i style="width:' + (vr.count / maxV * 100) + '%"></i></div>' +
           '<div class="fn">' + fmt(vr.count) + ' <small>· ' + pct(vr.coverage) + '</small></div></div></div>';
       }).join("");
-      html += card("Common event sequences", "The distinct paths sessions take through the game, ranked by how many sessions follow each. Repeated loops are folded to a single pass so structural paths stand out.",
+      html += card("Common event sequences", "The distinct paths sessions take through the game, ranked by how many sessions follow each (full raw traces, repeated loops are shown in full).",
         (d.variants && d.variants.length) ? vrows : '<p class="muted small">No sequences in range.</p>');
 
       // Directly-follows transitions + start/end activities.
@@ -726,7 +726,7 @@
   // View-local state persists across the module's local redraws and server
   // reloads (weight mode + validation are server-computed; threshold/labels are
   // display-only). It resets when you switch games so stale settings don't leak.
-  var tnaState = { game: null, weight: "probability", bootstrap: false, iter: 300, minWeight: 0, labels: true, k: 3, clAlgo: "kmeans", clDiss: "euclidean", clLink: "average" };
+  var tnaState = { game: null, weight: "probability", bootstrap: false, iter: 300, minWeight: 0, labels: true, k: 3, clAlgo: "pam", clDiss: "lv", clLink: "average", centMeasure: "betweenness", patOutcome: "score", patSupport: 0.1, cmpGroupBy: "score", cmpIter: 500, cmpView: "graph", patView: "graph", stabView: "graph", stabHidden: {} };
   function renderTNA(v) {
     if (tnaState.game !== state.gameId) { tnaState.game = state.gameId; tnaState.bootstrap = false; tnaState.minWeight = 0; }
     if (!window.SuiteTNA) { v.innerHTML = '<div class="empty">Network module not loaded.</div>'; return; }
@@ -752,6 +752,22 @@
           return api("/games/" + g + "/tna/sequences" + qs({
             from: state.from, to: state.to, user: state.player,
             offset: o.offset, limit: o.limit,
+          }));
+        },
+        // Behaviour patterns → outcome (lazy; only when the user runs it).
+        loadPatterns: function (o) {
+          o = o || {};
+          return api("/games/" + g + "/tna/patterns" + qs({
+            from: state.from, to: state.to, user: state.player,
+            outcome: o.outcome, minSupport: o.minSupport,
+          }));
+        },
+        // Cohort comparison via permutation test (lazy).
+        loadCompare: function (o) {
+          o = o || {};
+          return api("/games/" + g + "/tna/compare" + qs({
+            from: state.from, to: state.to, user: state.player,
+            groupBy: o.groupBy, iter: o.iter,
           }));
         },
       });
