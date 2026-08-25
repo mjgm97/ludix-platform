@@ -11,6 +11,12 @@
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]; }); }
   function fmt(n) { if (n == null || isNaN(n)) return "—"; return Number(n).toLocaleString(); }
   function pct(x, d) { return x == null || isNaN(x) ? "—" : (x * 100).toFixed(d == null ? 0 : d) + "%"; }
+  function fmtNum(v, d) { if (v == null || isNaN(v)) return "—"; var p = Math.pow(10, d == null ? 2 : d); return (Math.round(v * p) / p).toLocaleString("en-US"); }
+  // Score scale is game-dependent: a max at or below 1 means the game scores as a
+  // 0..1 fraction (show %); anything larger is raw points (show the number) — so a
+  // 32-point score no longer renders as "3200%". Pass the largest score in view.
+  function scoreFmt(v, max, d) { return v == null || isNaN(v) ? "—" : (max != null && max <= 1.0001) ? pct(v, d == null ? 1 : d) : fmtNum(v, d); }
+  function maxOf(rows, key) { var m = null; (rows || []).forEach(function (r) { if (r[key] != null && !isNaN(r[key]) && (m == null || r[key] > m)) m = r[key]; }); return m; }
   function dec(x, d) { return x == null || isNaN(x) ? "—" : Number(x).toFixed(d == null ? 2 : d); }
   function shortDay(s) { return s ? String(s).slice(5) : ""; }
   function qs(o) { var p = []; for (var k in o) if (o[k] != null && o[k] !== "") p.push(k + "=" + encodeURIComponent(o[k])); return p.length ? "?" + p.join("&") : ""; }
@@ -1086,6 +1092,7 @@
   function renderPlayers(v) {
     var g = encodeURIComponent(state.gameId);
     api("/games/" + g + "/players" + filterQS()).then(function (d) {
+      var smax = maxOf(d.players, "bestScore");   // one game here → one score scale
       var cols = [["username", "Player", 0], ["sessions", "Sessions", 1], ["events", "Events", 1], ["runs", "Runs", 1], ["bestScore", "Best", 1], ["bestStars", "Stars", 1], ["lastSeen", "Last seen", 0]];
       var rows = d.players.slice().sort(function (a, b) { var k = playerSort.key, x = a[k], y = b[k]; if (x == null) x = -Infinity; if (y == null) y = -Infinity; return (x < y ? -1 : x > y ? 1 : 0) * playerSort.dir; });
       var html = '<div class="card"><div class="card-head"><h3>Players</h3><span class="pill">' + rows.length + ' in range</span></div><div class="tbl-wrap"><table><thead><tr>' +
@@ -1093,7 +1100,7 @@
         (rows.length ? rows.map(function (p) {
           return '<tr class="clickable" data-user="' + esc(p.username) + '"><td><b>' + esc(p.username) + '</b></td>' +
             '<td class="num">' + fmt(p.sessions) + '</td><td class="num">' + fmt(p.events) + '</td>' +
-            '<td class="num">' + fmt(p.runs) + '</td><td class="num">' + (p.bestScore == null ? "—" : pct(p.bestScore)) + '</td>' +
+            '<td class="num">' + fmt(p.runs) + '</td><td class="num">' + scoreFmt(p.bestScore, smax) + '</td>' +
             '<td class="num">' + (p.bestStars == null ? "—" : "★".repeat(p.bestStars)) + '</td><td class="muted small">' + esc((p.lastSeen || "").slice(0, 16)) + '</td></tr>';
         }).join("") : '<tr><td colspan="7" class="muted">No players in range.</td></tr>') + "</tbody></table></div></div>";
       v.innerHTML = html;
@@ -1113,9 +1120,9 @@
         '<p class="muted small">joined ' + esc((d.player.created_at || "").slice(0, 10)) + ' · last seen ' + esc((d.player.last_seen_at || "").slice(0, 16)) + '</p>';
       html += '<div class="row-tiles">' + miniTile("Games", pg.length) + miniTile("Sessions", pg.reduce(function (a, x) { return a + x.sessions; }, 0)) + miniTile("Events", pg.reduce(function (a, x) { return a + x.events; }, 0)) + miniTile("Runs", pg.reduce(function (a, x) { return a + (x.runs || 0); }, 0)) + '</div>';
       html += '<div class="card" style="margin:0 0 14px"><h3>Per game</h3><div class="tbl-wrap"><table><thead><tr><th>Game</th><th class="num">Sessions</th><th class="num">Events</th><th class="num">Runs</th><th class="num">Best</th></tr></thead><tbody>' +
-        pg.map(function (x) { return '<tr><td>' + esc(x.gameId) + '</td><td class="num">' + fmt(x.sessions) + '</td><td class="num">' + fmt(x.events) + '</td><td class="num">' + fmt(x.runs) + '</td><td class="num">' + (x.best == null ? "—" : pct(x.best)) + '</td></tr>'; }).join("") + '</tbody></table></div></div>';
+        pg.map(function (x) { return '<tr><td>' + esc(x.gameId) + '</td><td class="num">' + fmt(x.sessions) + '</td><td class="num">' + fmt(x.events) + '</td><td class="num">' + fmt(x.runs) + '</td><td class="num">' + scoreFmt(x.best, x.best) + '</td></tr>'; }).join("") + '</tbody></table></div></div>';
       html += '<div class="card" style="margin:0"><h3>Recent runs</h3><div class="tbl-wrap"><table><thead><tr><th>When</th><th>Game</th><th>Level</th><th class="num">Score</th><th class="num">Stars</th></tr></thead><tbody>' +
-        (d.runs.length ? d.runs.slice(0, 20).map(function (r) { return '<tr><td class="muted small">' + esc((r.created_at || "").slice(0, 16)) + '</td><td>' + esc(r.gameId) + '</td><td>' + esc(r.level) + '</td><td class="num">' + (r.score == null ? "—" : pct(r.score)) + '</td><td class="num">' + (r.stars == null ? "—" : "★".repeat(r.stars)) + '</td></tr>'; }).join("") : '<tr><td colspan="5" class="muted">No runs.</td></tr>') + '</tbody></table></div></div>';
+        (d.runs.length ? d.runs.slice(0, 20).map(function (r) { return '<tr><td class="muted small">' + esc((r.created_at || "").slice(0, 16)) + '</td><td>' + esc(r.gameId) + '</td><td>' + esc(r.level) + '</td><td class="num">' + scoreFmt(r.score, r.score) + '</td><td class="num">' + (r.stars == null ? "—" : "★".repeat(r.stars)) + '</td></tr>'; }).join("") : '<tr><td colspan="5" class="muted">No runs.</td></tr>') + '</tbody></table></div></div>';
       mr.querySelector(".modal").innerHTML = html;
       flushCharts();
       $("#mx").addEventListener("click", function () { mr.innerHTML = ""; });
@@ -1655,6 +1662,7 @@
     hBars: hBars, svgHBars: svgHBars, flushCharts: flushCharts, legendRow: legendRow, tile: tile, miniTile: miniTile, card: card,
     selectBox: selectBox,
     esc: esc, fmt: fmt, pct: pct, dec: dec, COL: COL,
+    fmtNum: fmtNum, scoreFmt: scoreFmt, maxOf: maxOf,
   };
   window.SuiteDash = SuiteDash;
   window.SuiteGameRenderers = window.SuiteGameRenderers || {};

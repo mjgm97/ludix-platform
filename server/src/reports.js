@@ -34,6 +34,14 @@ function esc(s) {
 }
 function fmt(n) { return n == null || isNaN(n) ? "—" : Number(n).toLocaleString("en-US"); }
 function pct(x, d) { return x == null || isNaN(x) ? "—" : (x * 100).toFixed(d == null ? 0 : d) + "%"; }
+// A plain number for raw (non-fraction) scores: thousands separators, at most one
+// decimal so a value like 3198.5 stays readable and 3200 shows as "3,200".
+function fmtNum(v) { if (v == null || isNaN(v)) return "—"; return (Math.round(v * 10) / 10).toLocaleString("en-US"); }
+// Score scale is game-dependent: some games score as a 0..1 fraction (show %),
+// others as raw points (show the number). Anything with a max above 1 is raw —
+// this is what stops a 3200-point score from rendering as "320000%".
+function scoreIsFraction(scale) { return !scale || scale.max == null || scale.max <= 1.0001; }
+function fmtScore(v, scale) { return v == null ? "—" : scoreIsFraction(scale) ? pct(v, 1) : fmtNum(v); }
 function titleCase(s) { return String(s).replace(/[_\-]+/g, " ").replace(/\s+/g, " ").trim().replace(/\b\w/g, (c) => c.toUpperCase()); }
 function prettyGame(id) { return titleCase(id).replace(/\bAi\b/g, "AI").replace(/\bMl\b/g, "ML").replace(/\bVr\b/g, "VR"); }
 
@@ -52,9 +60,12 @@ function computeReportData(gameId, query, sections) {
        FROM events e${eJ} WHERE e.game_id=@g${eW}`
   ).get(P);
   const sc = db.prepare(
-    `SELECT COUNT(*) AS runs, AVG(s.score) AS avgScore, AVG(s.stars) AS avgStars
+    `SELECT COUNT(*) AS runs, AVG(s.score) AS avgScore, AVG(s.stars) AS avgStars,
+            MIN(s.score) AS minScore, MAX(s.score) AS maxScore
        FROM scores s${sJ} WHERE s.game_id=@g${sW}`
   ).get(P);
+  // Detected once here and reused everywhere a score is shown (histogram, table).
+  out.scoreScale = { min: sc.minScore, max: sc.maxScore, n: sc.runs };
   const returning = db.prepare(
     `SELECT COUNT(*) AS n FROM (SELECT e.player_id FROM events e${eJ}
        WHERE e.game_id=@g${eW} GROUP BY e.player_id HAVING COUNT(DISTINCT e.session_id) > 1)`
@@ -79,12 +90,27 @@ function computeReportData(gameId, query, sections) {
 
   // ---- Engagement distributions ----
   if (sections.engagement) {
-    const scoreAgg = db.prepare(
-      `SELECT MIN(9, MAX(0, CAST(s.score * 10 AS INT))) AS b, COUNT(*) AS n
-         FROM scores s${sJ} WHERE s.game_id=@g${sW} GROUP BY b`
-    ).all(P);
-    const sb = {}; scoreAgg.forEach((r) => (sb[r.b] = r.n));
-    out.scoreHistogram = HIST_SCORE_LABELS.map((label, i) => ({ label, value: sb[i] || 0 }));
+    // Score distribution: for a 0..1 fraction game, fixed 0–100% deciles; for a
+    // raw-points game, ten equal bins across the observed [min,max] with numeric
+    // labels — so the chart is meaningful whatever the score scale.
+    const scale = out.scoreScale;
+    out.scoreIsFraction = scoreIsFraction(scale);
+    if (out.scoreIsFraction) {
+      const scoreAgg = db.prepare(
+        `SELECT MIN(9, MAX(0, CAST(s.score * 10 AS INT))) AS b, COUNT(*) AS n
+           FROM scores s${sJ} WHERE s.game_id=@g${sW} GROUP BY b`
+      ).all(P);
+      const sb = {}; scoreAgg.forEach((r) => (sb[r.b] = r.n));
+      out.scoreHistogram = HIST_SCORE_LABELS.map((label, i) => ({ label, value: sb[i] || 0 }));
+    } else {
+      const mn = scale.min, span = (scale.max - scale.min) || 1;
+      const rows = db.prepare(
+        `SELECT MIN(9, MAX(0, CAST((s.score - @mn) * 10.0 / @span AS INT))) AS b, COUNT(*) AS n
+           FROM scores s${sJ} WHERE s.game_id=@g${sW} GROUP BY b`
+      ).all(Object.assign({ mn, span }, P));
+      const sb = {}; rows.forEach((r) => (sb[r.b] = r.n));
+      out.scoreHistogram = Array.from({ length: 10 }, (_, i) => ({ label: fmtNum(mn + (span * i) / 10), value: sb[i] || 0 }));
+    }
 
     const hourRows = db.prepare(
       `SELECT CAST(strftime('%H', e.created_at) AS INT) AS h, COUNT(*) AS n
@@ -300,7 +326,7 @@ function buildReportHtml(meta, data, sections) {
       ? `<h3>Common transitions</h3><p class="rep-note">The strongest step-to-step moves in the activity network, ranked by how often one action is followed by the next.</p>${transitionsHtml(data.transitions)}` : "";
     body += card("Engagement",
       "How play is distributed: score outcomes, session length, when students play, which actions they take, and the patterns and transitions in their behaviour.",
-      `<h3>Score distribution (%)</h3>${anyRuns ? svgBars(data.scoreHistogram, { color: C.gold }) : '<p class="rep-empty">No scored runs in range.</p>'}
+      `<h3>${data.scoreIsFraction ? "Score distribution (%)" : "Score distribution"}</h3>${anyRuns ? svgBars(data.scoreHistogram, { color: C.gold, every: data.scoreIsFraction ? 1 : 2 }) : '<p class="rep-empty">No scored runs in range.</p>'}
        <h3>Session length</h3>${svgBars(data.sessionLength, { color: C.green })}
        <h3>Activity by hour of day</h3>${svgBars(data.hourly, { color: C.blue, every: 3 })}
        ${data.eventTypes && data.eventTypes.length ? `<h3>Top event types</h3>${svgHBars(data.eventTypes, { color: C.purple })}` : ""}
@@ -318,9 +344,11 @@ function buildReportHtml(meta, data, sections) {
   }
 
   if (sections.students) {
-    // Columns mirror the dashboard's Players table (best score shown as a %).
+    // Best score respects the detected scale: a percentage for fraction-scored
+    // games, the raw number otherwise (so a 3200-point best doesn't read as %).
+    const scale = data.scoreScale;
     const rows = (data.students || []).map((r) =>
-      `<tr><td>${esc(r.username)}</td><td class="num">${fmt(r.sessions)}</td><td class="num">${fmt(r.events)}</td><td class="num">${fmt(r.runs)}</td><td class="num">${r.bestScore != null ? pct(r.bestScore, 1) : "—"}</td><td class="rep-when">${esc((r.lastSeen || "").slice(0, 16))}</td></tr>`
+      `<tr><td>${esc(r.username)}</td><td class="num">${fmt(r.sessions)}</td><td class="num">${fmt(r.events)}</td><td class="num">${fmt(r.runs)}</td><td class="num">${fmtScore(r.bestScore, scale)}</td><td class="rep-when">${esc((r.lastSeen || "").slice(0, 16))}</td></tr>`
     ).join("");
     body += card("Students", `${(data.students || []).length} student${(data.students || []).length === 1 ? "" : "s"} in scope.`,
       rows ? `<div class="rep-tbl-wrap"><table class="rep-tbl"><thead><tr><th>Student</th><th class="num">Sessions</th><th class="num">Events</th><th class="num">Runs</th><th class="num">Best score</th><th>Last seen</th></tr></thead><tbody>${rows}</tbody></table></div>`

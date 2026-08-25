@@ -53,11 +53,20 @@
       var map = { eventCount: "event count", distinctTypes: "distinct types", durationMin: "duration (min)", eventsPerMin: "events / min", selfLoopRate: "self-loop rate", priorRuns: "prior runs", priorAvgScore: "prior avg score", level: "level" };
       return map[name] || String(name).replace(/[_\-]+/g, " ");
     }
-    // Target value formatting: pass = probability, sessionLen = minutes, else raw.
+    // Score scale (fraction vs raw points) detected from the explained runs, so a
+    // raw score like 32 isn't formatted as "3200%" (matches the dashboard tables).
+    var scoreMax = null;
+    if (data.target === "score") {
+      var _sv = [];
+      (data.instances || []).forEach(function (r) { if (r.actual != null) _sv.push(r.actual); if (r.predicted != null) _sv.push(r.predicted); });
+      scoreMax = _sv.length ? Math.max.apply(null, _sv) : null;
+    }
+    // Target value formatting: pass = probability, sessionLen = minutes, score =
+    // % or points depending on the game's scale, else raw.
     function fmtY(v) {
       if (v == null || isNaN(v)) return "—";
       if (data.classify) return pct(v, 1);
-      if (data.target === "score") return pct(v, 1);
+      if (data.target === "score") return D.scoreFmt(v, scoreMax);
       if (data.target === "sessionLen") return dec(v, 1) + "m";
       return dec(v, 2);
     }
