@@ -74,22 +74,37 @@ charts (hover for values, click legends to toggle series), a raw event explorer,
 and filtered CSV / JSON export of events or runs.
 
 Most views are game-agnostic, derived from the event envelope and scores, so
-every game has them without extra work:
+every game gets them for free. The dashboard is a set of tabs:
 
-- General: players, sessions, events, runs, engagement (session length,
-  events/session, returning rate), activity over time, distributions, most active
-  players, event-type volume.
-- Process: process mining from the raw event stream (trace variants, a
-  directly-follows graph, start/end activities).
-- Network (TNA): transition network analysis. A Markov transition network
-  (nodes are activities, edges are transition probabilities) with node and edge
-  centralities, initial-state probabilities, a sequence index plot, bootstrap edge
-  validation, and sequence clustering (k-means, k-medoids, or hierarchical over
-  several dissimilarities, including sequence edit distance), each cluster with its
-  own network and sequences.
-- Insights: per-game. A game can add its own analytics view (for example a
+- **Overview**: every game that has data, with suite-wide totals (games, players,
+  events, runs, admins).
+- **General**: the headline tiles (players, sessions, events, runs, engagement —
+  session length, events/session, returning rate), activity over time and
+  distributions, most active players and event-type volume. Plus a research
+  layer: a learning curve (mean score by attempt), an effort–performance
+  relationship (time-on-task vs achievement, with Pearson r), a retention/survival
+  curve, and engagement inequality (Gini + Lorenz).
+- **Process**: process mining from the raw event stream — trace variants, a
+  directly-follows graph, and start/end activities.
+- **Network**: transition network analysis. A Markov transition network (nodes are
+  activities, edges are transition probabilities) with node/edge centralities,
+  initial-state probabilities, a paginated sequence index plot, and bootstrap edge
+  validation; sequence clustering (k-means, k-medoids, or hierarchical over several
+  dissimilarities, including sequence edit distance), each cluster with its own
+  network; frequent behaviour patterns screened for association with a run outcome;
+  and cohort comparison (two networks — high vs low on an outcome — compared
+  edge-by-edge with a permutation test).
+- **Prediction**: trains a gradient-boosted decision-tree ensemble to estimate a
+  selectable target (score, stars, session length, or pass/fail) from a run's
+  behaviour features, and explains it with exact TreeSHAP — global feature
+  importance and per-run local attributions.
+- **Insights**: per-game. A game can add its own analytics view (for example a
   domain-specific funnel or learning signal). None ship by default, so a game with
   no module shows an empty state until one is added.
+- **Players** / **Events**: a per-player roster and drill-down, and a paginated
+  raw-event explorer.
+- **Export** / **Import** / **Admin**: filtered downloads and shareable reports,
+  bringing in an existing log, and managing admin accounts (all covered below).
 
 Adding a game's insights takes two files:
 
@@ -133,6 +148,16 @@ Games can also be hosted elsewhere (Netlify, S3, nginx) and point at this
 server's API: set `SERVE_STATIC=false` and list their origins in
 `ALLOWED_ORIGINS`.
 
+### Reports
+
+The **Export** tab does two things. First, filtered raw-data downloads: events or
+runs, as CSV or JSON, honouring the current game / date / player selection.
+Second, a **report builder** — a self-contained HTML page (open it and use
+**Print → Save as PDF** for a PDF) assembled from the same analytics as the
+dashboard, scoped to the current selection, with tick-boxes for which sections to
+include. Generated reports are stored and listed in a history you can reopen,
+download or delete; the suite keeps up to 50 at a time.
+
 ### Importing an existing event log
 
 The dashboard's **Import** tab brings an existing log (from another game, tool,
@@ -148,7 +173,9 @@ or JSON file; the parser proposes a column mapping, which you confirm:
 This is the standard process-mining (case, activity, timestamp) triple, so most
 existing logs map straight in. A file exported from Ludix's own **Export** tab is
 auto-detected and re-imports exactly. Upload size is capped by `IMPORT_LIMIT`
-(default 32mb).
+(default 32mb). Each import is tracked as a batch (its events and synthetic runs
+carry the batch id), so it can be listed and removed again as a unit if a mapping
+turns out wrong.
 
 ---
 
@@ -216,21 +243,35 @@ Base path: `/api`. All bodies are JSON.
 | `GET`/`POST`/`DELETE` | `/api/admin/accounts[/:id]` | Manage admin accounts |
 | `GET` | `/api/admin/overview` | Games with data + suite totals |
 | `GET` | `/api/admin/games/:gameId/summary?from=&to=&user=` | **General** tiles + distributions |
+| `GET` | `/api/admin/games/:gameId/timeseries?from=&to=&user=` | **General** daily activity series |
+| `GET` | `/api/admin/games/:gameId/research?from=&to=&user=` | **General** research layer — learning curve, effort/performance, retention, Gini |
 | `GET` | `/api/admin/games/:gameId/process?from=&to=&user=` | **Process** mining (variants, DFG, start/end) |
 | `GET` | `/api/admin/games/:gameId/tna?…&weight=&bootstrap=&iter=` | **Network** — transition network, centralities, sequences, validation |
 | `GET` | `/api/admin/games/:gameId/tna/clusters?k=&algorithm=&dissimilarity=&linkage=` | Sequence clustering → per-cluster networks |
-| `GET` | `/api/admin/games/:gameId/specific?from=&to=&user=` | **Game-specific** analytics (or `{hasModule:false}`) |
-| `GET` | `/api/admin/games/:gameId/timeseries` | Daily activity series (general) |
-| `GET` | `/api/admin/games/:gameId/players` | Per-player breakdown |
+| `GET` | `/api/admin/games/:gameId/tna/sequences?offset=&limit=` | One page of the sequence index plot |
+| `GET` | `/api/admin/games/:gameId/tna/patterns?outcome=&minSupport=` | Frequent behaviour patterns vs a run outcome |
+| `GET` | `/api/admin/games/:gameId/tna/compare?outcome=&…` | Cohort comparison (two networks, permutation test) |
+| `GET` | `/api/admin/games/:gameId/predict?target=&features=&estimators=&maxDepth=&…` | **Prediction** — GBDT estimate + TreeSHAP explanations |
+| `GET` | `/api/admin/games/:gameId/specific?from=&to=&user=` | **Insights** — game-specific analytics (or `{hasModule:false}`) |
+| `GET` | `/api/admin/games/:gameId/players?light=` | Per-player breakdown (`light=1` = roster only) |
 | `GET` | `/api/admin/players/:username?game=` | One player, drilled down |
 | `GET` | `/api/admin/games/:gameId/events?type=&limit=&offset=` | Paginated raw events |
 | `GET` | `/api/admin/export?game=&dataset=events\|scores&format=csv\|json&from=&to=&user=&type=` | Filtered download |
 | `POST` | `/api/admin/import/analyze` | Sniff an uploaded CSV/JSON, propose a column mapping (no writes) |
 | `POST` | `/api/admin/import/commit` | Import the log into a game with a confirmed mapping |
 | `GET` | `/api/admin/import/existing?game=` | Events already stored under a game (import warns before appending) |
+| `GET`/`DELETE` | `/api/admin/imports[/:id]?game=` | List import batches, or remove one as a unit |
+| `POST` | `/api/admin/reports` | Build + store a report from the current selection → `{ id }` |
+| `GET` | `/api/admin/reports?game=` | Saved reports (with `total` + `max`) |
+| `GET` | `/api/admin/reports/:id?download=` | View the report as HTML (`download=1` = attachment) |
+| `DELETE` | `/api/admin/reports/:id` | Delete a saved report |
 
 > `user=` accepts one name or a comma-separated list (filter to several players
-> at once); `from`/`to`/`user` apply to every analytics endpoint above.
+> at once); `from`/`to`/`user` apply to every analytics endpoint above. The
+> analytics tabs also take their own tuning params (e.g. `weight`, `bootstrap`,
+> `iter` for the network; `k`, `algorithm`, `dissimilarity`, `linkage` for
+> clustering; `target`, `features`, `estimators`, `maxDepth`, `learningRate`,
+> `threshold` for prediction).
 
 ### Watching the data live
 
@@ -277,8 +318,10 @@ curl -X POST localhost:3000/api/games/quick-tap/scores \
 `players` (shared across the suite), `scores` (one row per run, powers
 leaderboards), and `events` (the full analytics log, one row per event).
 Everything is keyed by `game_id`, so adding a new game needs no schema change;
-just submit with a new `gameId`. Two more tables back the dashboard: `admin_users`
-(login accounts, scrypt-hashed passwords) and `admin_sessions`.
+just submit with a new `gameId`. Four more tables back the dashboard:
+`admin_users` (login accounts, scrypt-hashed passwords), `admin_sessions`,
+`imports` (one row per import batch, so a commit can be undone as a unit), and
+`reports` (saved report HTML + the selection it was built from).
 
 ---
 
