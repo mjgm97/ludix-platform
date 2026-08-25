@@ -397,7 +397,7 @@ a{color:inherit;text-decoration:none}
 .btn{display:inline-flex;align-items:center;gap:8px;border-radius:12px;padding:12px 20px;
   font-weight:800;font-size:15px;cursor:pointer;transition:transform .14s,border-color .14s,background .14s,box-shadow .14s;border:1px solid transparent}
 .btn.sm{padding:8px 13px;font-size:13px;border-radius:10px}
-.btn.primary{background:linear-gradient(90deg,var(--gold),var(--green));color:#0b1120;box-shadow:0 12px 30px rgba(74,214,160,.22)}
+.btn.primary{background:linear-gradient(95deg,var(--gold) 0%,#9ad98a 50%,var(--green) 100%) border-box;background-repeat:no-repeat;color:#0b1120;box-shadow:0 12px 30px rgba(74,214,160,.22)}
 .btn.primary:hover{transform:translateY(-2px);box-shadow:0 18px 40px rgba(74,214,160,.3)}
 .btn.ghost{background:rgba(19,33,53,.6);border-color:var(--line);color:var(--ink)}
 .btn.ghost:hover{border-color:var(--green);transform:translateY(-1px)}
