@@ -283,8 +283,6 @@ The methods and libraries Ludix builds on:
 7. Benjamini, Y., & Hochberg, Y. (1995). *Controlling the False Discovery Rate.* *Journal of the Royal Statistical Society: Series B*, 57(1), 289–300.
 8. van der Aalst, W. M. P. (2016). *Process Mining: Data Science in Action.* Springer.
 
-Runtime dependencies: [Node.js](https://nodejs.org), [Express](https://expressjs.com), and [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3).
-
 ## Contributing
 
 Contributions are welcome. The most direct way in is to add a game with the template above, or to

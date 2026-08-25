@@ -743,9 +743,16 @@
   // =========================================================================
   // TABS + ROUTER
   // =========================================================================
+  // Tabs live in two groups (game analytics + data/admin), so clear "active" by
+  // querying every tab button rather than the nav's direct children.
+  function setActiveTab(name) {
+    [].forEach.call($("#tabs").querySelectorAll("[data-tab]"), function (c) {
+      c.classList.toggle("active", c.getAttribute("data-tab") === name);
+    });
+  }
   $("#tabs").addEventListener("click", function (e) {
     var b = e.target.closest("[data-tab]"); if (!b) return;
-    [].forEach.call(this.children, function (c) { c.classList.remove("active"); }); b.classList.add("active");
+    setActiveTab(b.getAttribute("data-tab"));
     state.tab = b.getAttribute("data-tab"); render();
   });
 
@@ -1472,7 +1479,7 @@
   function miniTile(k, v, sub) { return '<div class="tile"><div class="k">' + esc(k) + '</div><div class="v" style="font-size:20px">' + v + '</div>' + (sub ? '<div class="k" style="text-transform:none;margin-top:2px">' + esc(sub) + '</div>' : "") + '</div>'; }
   function card(title, cap, body) { return '<div class="card"><h3>' + esc(title) + '</h3>' + (cap ? '<p class="cap">' + esc(cap) + '</p>' : "") + body + '</div>'; }
   function errBox(v) { return function (e) { if (e && e.message === "unauthorized") return; v.innerHTML = '<div class="empty">Could not load: ' + esc(e && e.message) + '</div>'; }; }
-  function gotoTab(name) { [].forEach.call($("#tabs").children, function (c) { c.classList.toggle("active", c.getAttribute("data-tab") === name); }); state.tab = name; render(); }
+  function gotoTab(name) { setActiveTab(name); state.tab = name; render(); }
 
   // Toolkit exposed to per-game insight renderers (public/admin/games/<id>.js).
   // Each registers window.SuiteGameRenderers[gameId] = function(data, dash){...}
