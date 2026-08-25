@@ -1,5 +1,5 @@
 # Citation metadata for Ludix — used by GitHub's "Cite this repository" button
-# and by the SoftwareX submission. Fill in every TODO before publishing.
+# and by the software journal submission. Fill in every TODO before publishing.
 # Reference: https://citation-file-format.github.io/
 cff-version: 1.2.0
 message: "If you use this software, please cite it using these metadata."
@@ -12,16 +12,16 @@ abstract: >-
   clustering with no per-game code.
 type: software
 authors:
-  - family-names: "Gómez Moratilla"        # TODO: verify
-    given-names: "Manuel Jesús"             # TODO: verify
-    affiliation: "Universidad de Murcia"    # TODO: verify
-    orcid: "https://orcid.org/0000-0000-0000-0000"  # TODO: add your ORCID
-    email: "manueljesus.gomezm@um.es"       # TODO: verify / replace
+  - family-names: "Gómez Moratilla"        
+    given-names: "Manuel Jesús"             
+    affiliation: "Universidad de Murcia"    
+    orcid: "https://orcid.org/0000-0003-0571-2923"
+    email: "manueljesus.gomezm@um.es"       
 license: MIT
 repository-code: "https://github.com/mjgm97/ludix"
 url: "https://github.com/mjgm97/ludix"
-version: "1.0.0"                             # TODO: set the released version
-date-released: "2026-01-01"                  # TODO: set the release date (YYYY-MM-DD)
+version: "1.0.0"                             
+date-released: "2026-08-20"                  
 keywords:
   - learning analytics
   - educational games
@@ -29,7 +29,7 @@ keywords:
   - transition network analysis
   - sequence clustering
   - serious games
-# When the SoftwareX article is published, add its DOI as a preferred citation:
+# When the journal article is published, add its DOI as a preferred citation:
 # preferred-citation:
 #   type: article
 #   title: "Ludix: ..."

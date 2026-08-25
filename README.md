@@ -81,7 +81,7 @@ concentrated participation is across learners.
 
 <div align="center">
 <img alt="Engagement and learning-analytics metrics" src="docs/img/general.jpg" width="92%">
-<br><em>Engagement KPIs and a “research analytics” block: learning curve, effort–performance correlation, retention survival, and engagement inequality (Lorenz/Gini).</em>
+<br><em>Engagement at a glance — KPIs, activity over time, new-vs-returning players, and score/session distributions; the tab continues with a research-analytics block (learning curve, effort–performance correlation, retention survival, and Lorenz/Gini engagement inequality).</em>
 </div>
 
 ### Process mining
@@ -94,7 +94,7 @@ directly-follows chains. Process discovery is delegated to ladyna’s `processmi
 
 <div align="center">
 <img alt="Process mining — activities, trace variants, directly-follows graph" src="docs/img/process.jpg" width="92%">
-<br><em>Activity statistics, the most common event sequences (expandable per row), and the directly-follows / start-end structure of the process.</em>
+<br><em>Process statistics, the activity mix, and the most common event sequences (each row expandable); the directly-follows graph and start/end activities follow below.</em>
 </div>
 
 ### Transition network analysis (TNA)
@@ -138,7 +138,7 @@ a Python/R stack.
 
 <div align="center">
 <img alt="Explainable predictive modelling with SHAP" src="docs/img/predict.jpg" width="92%">
-<br><em>An interpretable model of run outcome: held-out metrics, global SHAP importance, a SHAP summary (beeswarm), per-run local explanations, and predicted-vs-actual diagnostics.</em>
+<br><em>An interpretable model of run outcome: choose target, estimator and feature groups, read held-out metrics (R²/RMSE/MAE vs. a baseline), and inspect global SHAP feature importance; the tab continues with a SHAP beeswarm, per-run local explanations (waterfall), and predicted-vs-actual diagnostics.</em>
 </div>
 
 ### Statistical pattern→outcome mining and cohort comparison
@@ -269,5 +269,4 @@ improve the shared server and analytics. Open an
 
 Ludix is released under the [MIT License](LICENSE). If you use it in academic work, please cite it
 using the metadata in [`CITATION.cff`](CITATION.cff), from which GitHub renders a “Cite this
-repository” button; the accompanying SoftwareX article will be added there as the preferred citation
-once published.
+repository” button.
