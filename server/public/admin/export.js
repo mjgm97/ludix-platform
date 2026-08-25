@@ -31,8 +31,8 @@
   // file instead of falling back to invisible black. Dark values on dark/
   // transparent backgrounds; darker, higher-contrast values on white.
   var PALETTE = {
-    dark: { ink: "#eff3ff", muted: "#93a4c9", muted2: "#63718f", line: "#25324e", gold: "#ffd54a", green: "#4ad6a0", blue: "#5aa9ff", red: "#ff6b6b", orange: "#ff8a5a", purple: "#b18aff" },
-    white: { ink: "#1f2a3d", muted: "#55637d", muted2: "#7784a0", line: "#c9d3e6", gold: "#b8860b", green: "#1a9e6f", blue: "#2f7fd0", red: "#d9433f", orange: "#d9642a", purple: "#7c53d6" },
+    dark: { ink: "#eff3ff", muted: "#93a4c9", muted2: "#63718f", line: "#25324e", bg2: "#0d1424", gold: "#ffd54a", green: "#4ad6a0", blue: "#5aa9ff", red: "#ff6b6b", orange: "#ff8a5a", purple: "#b18aff" },
+    white: { ink: "#1f2a3d", muted: "#55637d", muted2: "#7784a0", line: "#c9d3e6", bg2: "#e7edf7", gold: "#b8860b", green: "#1a9e6f", blue: "#2f7fd0", red: "#d9433f", orange: "#d9642a", purple: "#7c53d6" },
   };
   function varsBlock(p) {
     var s = "svg{";
@@ -68,8 +68,11 @@
   function serialize(svg, opts) {
     opts = opts || {};
     var bg = opts.bg in BACKGROUNDS ? opts.bg : "dark";
-    var d = dims(svg);
-    var clone = svg.cloneNode(true);
+    // Some charts (the collapsible sequence map) provide a toggle-free, fully
+    // expanded SVG for static export; prefer it so no "+N more" pill is baked in.
+    var source = (typeof svg.__exportBuild === "function" && svg.__exportBuild()) || svg;
+    var d = dims(source);
+    var clone = source.cloneNode(true);
     clone.setAttribute("xmlns", SVGNS);
     clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
     clone.setAttribute("width", d.w);

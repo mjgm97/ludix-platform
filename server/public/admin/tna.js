@@ -179,6 +179,7 @@
       '</div><div id="tnaCompare"></div></div>';
 
     container.innerHTML = html;
+    if (D.flushCharts) D.flushCharts();   // mount any placeholder charts (e.g. Initial probabilities hBars)
 
     // =======================================================================
     // REUSABLE DRAW HELPERS (shared by the main view and the cluster cards)
@@ -413,39 +414,17 @@
     // node colour so the chart reads against the network; hovering a bar shows
     // exact count + share and lights up that activity's transitions in the graph
     // (via the network's isolate handle when present).
+    // Activity-frequency bars, as an exportable <svg> (shared with the dashboard's
+    // svgHBars). Hovering a bar isolates that state in the network, as before.
     function mountFreq(mount, nodes) {
-      var items = nodes.slice().sort(function (a, b) { return b.frequency - a.frequency; });
-      if (!items.length) { mount.innerHTML = '<p class="muted small">No activities to chart.</p>'; return; }
-      var maxV = items.reduce(function (m, x) { return Math.max(m, x.frequency); }, 1);
-      var total = items.reduce(function (t, x) { return t + x.frequency; }, 0) || 1;
-      var rows = items.map(function (it) {
-        var c = colorOf[it.id] || COL.muted, w = Math.max(2, it.frequency / maxV * 100);
-        return '<div class="tna-hbar" data-id="' + esc(it.id) + '" tabindex="0">' +
-          '<div class="hb-name" style="color:' + c + '">' + esc(pretty(it.id)) + "</div>" +
-          '<div class="hb-track"><i style="width:' + w.toFixed(1) + "%;background:" + c + '"></i></div>' +
-          '<div class="hb-val">' + fmt(it.frequency) + "</div></div>";
-      }).join("");
-      mount.innerHTML = '<div class="tna-hbars">' + rows + '<div class="chart-tip" id="tnaFreqTip" style="display:none"></div></div>';
-
-      var wrap = mount.querySelector(".tna-hbars"), tip = mount.querySelector("#tnaFreqTip");
-      [].forEach.call(wrap.querySelectorAll(".tna-hbar"), function (row) {
-        var id = row.getAttribute("data-id");
-        var it = items.filter(function (x) { return String(x.id) === id; })[0];
-        function enter() { if (netApi) netApi.isolate(id, true); }
-        function leave() { tip.style.display = "none"; if (netApi) netApi.isolate(id, false); }
-        function move(e) {
-          tip.innerHTML = '<div class="r"><i style="background:' + (colorOf[id] || COL.muted) + '"></i>' + esc(pretty(id)) + " · <b>" + fmt(it.frequency) + "</b> events · " + pct(it.frequency / total) + "</div>";
-          tip.style.display = "block";
-          var hr = wrap.getBoundingClientRect();
-          var x = e.clientX - hr.left, y = e.clientY - hr.top;
-          tip.style.left = Math.min(wrap.clientWidth - tip.offsetWidth - 6, Math.max(6, x + 14)) + "px";
-          tip.style.top = Math.max(4, y - tip.offsetHeight - 8) + "px";
-        }
-        row.addEventListener("mouseenter", enter);
-        row.addEventListener("mousemove", move);
-        row.addEventListener("mouseleave", leave);
-        row.addEventListener("focus", enter);
-        row.addEventListener("blur", leave);
+      var items = nodes.slice().sort(function (a, b) { return b.frequency - a.frequency; })
+        .map(function (x) { return { id: x.id, label: pretty(x.id), value: x.frequency, color: colorOf[x.id] || COL.muted }; });
+      var total = items.reduce(function (t, x) { return t + x.value; }, 0) || 1;
+      D.svgHBars(mount, items, {
+        labelColor: "item", fill: "item", empty: "No activities to chart.",
+        onEnter: function (id) { if (netApi) netApi.isolate(id, true); },
+        onLeave: function (id) { if (netApi) netApi.isolate(id, false); },
+        tipHtml: function (it) { return '<div class="r"><i style="background:' + it.color + '"></i>' + esc(it.label) + " · <b>" + fmt(it.value) + "</b> events · " + pct(it.value / total) + "</div>"; },
       });
     }
 
@@ -503,36 +482,13 @@
     function centMeasureMeta(key) { for (var i = 0; i < CENT_MEASURES.length; i++) if (CENT_MEASURES[i][0] === key) return CENT_MEASURES[i]; return CENT_MEASURES[0]; }
     function drawCentBars() {
       var meta = centMeasureMeta(st.centMeasure || "betweenness"), key = meta[0], prec = meta[2];
-      var items = data.centrality.map(function (r) { return { id: r.state, value: +r[key] || 0 }; }).sort(function (a, b) { return b.value - a.value; });
-      if (!items.length) { centBarsMount.innerHTML = '<p class="muted small">No states to chart.</p>'; return; }
-      var maxV = items.reduce(function (m, x) { return Math.max(m, x.value); }, 0) || 1;
-      var rows = items.map(function (it) {
-        var c = colorOf[it.id] || COL.muted, w = maxV > 0 ? Math.max(2, it.value / maxV * 100) : 2;
-        return '<div class="tna-hbar" data-id="' + esc(it.id) + '" tabindex="0">' +
-          '<div class="hb-name" style="color:' + c + '">' + esc(pretty(it.id)) + "</div>" +
-          '<div class="hb-track"><i style="width:' + w.toFixed(1) + "%;background:" + c + '"></i></div>' +
-          '<div class="hb-val">' + dec(it.value, prec) + "</div></div>";
-      }).join("");
-      centBarsMount.innerHTML = '<div class="tna-hbars">' + rows + '<div class="chart-tip" id="tnaCentTip" style="display:none"></div></div>';
-
-      var wrap = centBarsMount.querySelector(".tna-hbars"), tip = centBarsMount.querySelector("#tnaCentTip");
-      [].forEach.call(wrap.querySelectorAll(".tna-hbar"), function (row) {
-        var id = row.getAttribute("data-id");
-        var it = items.filter(function (x) { return String(x.id) === id; })[0];
-        function enter() { if (netApi) netApi.isolate(id, true); }
-        function leave() { tip.style.display = "none"; if (netApi) netApi.isolate(id, false); }
-        function move(e) {
-          tip.innerHTML = '<div class="r"><i style="background:' + (colorOf[id] || COL.muted) + '"></i>' + esc(pretty(id)) + " · " + esc(meta[1]) + " <b>" + dec(it.value, prec) + "</b></div>";
-          tip.style.display = "block";
-          var hr = wrap.getBoundingClientRect(), x = e.clientX - hr.left, y = e.clientY - hr.top;
-          tip.style.left = Math.min(wrap.clientWidth - tip.offsetWidth - 6, Math.max(6, x + 14)) + "px";
-          tip.style.top = Math.max(4, y - tip.offsetHeight - 8) + "px";
-        }
-        row.addEventListener("mouseenter", enter);
-        row.addEventListener("mousemove", move);
-        row.addEventListener("mouseleave", leave);
-        row.addEventListener("focus", enter);
-        row.addEventListener("blur", leave);
+      var items = data.centrality.map(function (r) { return { id: r.state, label: pretty(r.state), value: +r[key] || 0, color: colorOf[r.state] || COL.muted }; }).sort(function (a, b) { return b.value - a.value; });
+      D.svgHBars(centBarsMount, items, {
+        labelColor: "item", fill: "item", empty: "No states to chart.",
+        valFmt: function (v) { return dec(v, prec); },
+        onEnter: function (id) { if (netApi) netApi.isolate(id, true); },
+        onLeave: function (id) { if (netApi) netApi.isolate(id, false); },
+        tipHtml: function (it) { return '<div class="r"><i style="background:' + it.color + '"></i>' + esc(it.label) + " · " + esc(meta[1]) + " <b>" + dec(it.value, prec) + "</b></div>"; },
       });
     }
     centMeasureSel.addEventListener("change", function () { st.centMeasure = centMeasureSel.value; drawCentBars(); });

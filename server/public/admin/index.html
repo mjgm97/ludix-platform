@@ -307,6 +307,9 @@
   /* ---- Interactive charts (mounted by app.js — keep class contract) ---- */
   .chart{position:relative}
   svg.ichart{cursor:crosshair}
+  svg .seq-toggle rect{transition:stroke .12s,fill .12s}
+  svg .seq-toggle:hover rect{stroke:var(--gold);fill:var(--bg3,var(--bg2))}
+  svg .seq-toggle:hover text{fill:var(--gold)}
   .chart-tip{position:absolute;pointer-events:none;background:#0b1120f2;border:1px solid var(--line2);
     border-radius:10px;padding:8px 11px;font-size:12px;color:var(--ink);box-shadow:0 14px 34px rgba(0,0,0,.6);
     z-index:6;white-space:nowrap;backdrop-filter:blur(6px);transition:opacity .1s}

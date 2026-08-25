@@ -217,16 +217,259 @@
     });
   }
 
-  // ---- Horizontal category bars (HTML, animated fill + hover) ---------------
+  // ---- Text metrics (for laying out SVG pills/labels) -----------------------
+  // A single offscreen canvas measures label/pill text so the SVG rebuilds size
+  // to their content the way the HTML versions did via layout. Nunito may not be
+  // a canvas-registered font, so widths are approximate — callers pad generously.
+  var _measureCtx = null;
+  function measureTextW(text, font) {
+    if (!_measureCtx) { var c = document.createElement("canvas"); _measureCtx = c.getContext("2d"); }
+    _measureCtx.font = font || "800 12.5px Nunito, system-ui, sans-serif";
+    return _measureCtx.measureText(String(text == null ? "" : text)).width;
+  }
+  function truncToWidth(text, maxW, font) {
+    text = String(text == null ? "" : text);
+    if (measureTextW(text, font) <= maxW) return text;
+    var e = "…";
+    while (text.length && measureTextW(text + e, font) > maxW) text = text.slice(0, -1);
+    return text + e;
+  }
+  var _gradSeq = 0;
+
+  // ---- Shared horizontal bar chart, as self-contained inline SVG ------------
+  // Reproduces the look of the old HTML bar lists (label · track · value) but as
+  // an <svg class="ichart">, so the export decorator covers it like every other
+  // chart. Colours use CSS custom properties (--ink/--muted/--bg2) so they adapt
+  // to the export's dark/white palette; bars take a literal colour or the shared
+  // gold→green gradient. Builds into `host` and wires the same hover behaviour
+  // (tooltip + optional row enter/leave callbacks, e.g. network isolation).
+  //   items: [{ label, value, color?, id?, valText?, tip? }]
+  //   opts:  { W, labelW, valW, barH, labelColor:'muted'|'item', fill:'item'|'grad',
+  //            valFmt, max, onEnter(id), onLeave(id), tipHtml(item) }
+  function svgHBars(host, items, opts) {
+    opts = opts || {};
+    if (!items || !items.length) { host.innerHTML = '<p class="muted small">' + (opts.empty || "No data.") + "</p>"; return; }
+    var W = opts.W || 740, padX = 9, gapL = 12, gapR = 12;
+    var labelW = opts.labelW || 150, valW = opts.valW == null ? 58 : opts.valW;
+    var barH = opts.barH || 15, rowPad = opts.rowPad == null ? 7 : opts.rowPad, rowGap = opts.rowGap == null ? 2 : opts.rowGap;
+    var rowH = barH + rowPad * 2, topPad = 3, botPad = 3;
+    var trackX = padX + labelW + gapL, trackW = Math.max(30, W - trackX - gapR - valW - padX);
+    var H = topPad + botPad + items.length * rowH + (items.length - 1) * rowGap;
+    var valFmt = opts.valFmt || fmt, lblFont = "800 12.5px Nunito, system-ui, sans-serif";
+    var max = opts.max != null ? opts.max : items.reduce(function (m, it) { return Math.max(m, it.value); }, 0) || 1;
+    var labelIsItem = opts.labelColor === "item", useGrad = opts.fill === "grad";
+    var gradId = "hbgrad" + (++_gradSeq);
+
+    var s = '<svg viewBox="0 0 ' + W + " " + H + '" class="ichart hbars-svg" preserveAspectRatio="xMinYMin meet">';
+    if (useGrad) s += '<defs><linearGradient id="' + gradId + '" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="' + COL.gold + '"/><stop offset="1" stop-color="' + COL.green + '"/></linearGradient></defs>';
+    items.forEach(function (it, i) {
+      var y0 = topPad + i * (rowH + rowGap), cy = y0 + rowH / 2, barY = y0 + rowPad;
+      var c = it.color || COL.blue, w = Math.max(2, (it.value / max) * trackW);
+      var fill = useGrad ? "url(#" + gradId + ")" : c;
+      var lblStyle = labelIsItem ? "fill:" + c : "fill:var(--muted)";
+      s += '<g class="hbrow" data-i="' + i + '"' + (it.id != null ? ' data-id="' + esc(it.id) + '"' : "") + '>';
+      s += '<rect class="hbrow-hl" x="' + (padX - 3) + '" y="' + y0.toFixed(1) + '" width="' + (W - (padX - 3) * 2) + '" height="' + rowH + '" rx="10" fill="#141f38" opacity="0"/>';
+      s += '<text x="' + padX + '" y="' + cy.toFixed(1) + '" dominant-baseline="central" style="' + lblStyle + ';font-size:12.5px;font-weight:800">' + esc(truncToWidth(it.label, labelW, lblFont)) + "</text>";
+      s += '<rect x="' + trackX + '" y="' + barY.toFixed(1) + '" width="' + trackW.toFixed(1) + '" height="' + barH + '" rx="' + (barH / 2).toFixed(1) + '" style="fill:var(--bg2)"/>';
+      s += '<rect x="' + trackX + '" y="' + barY.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + barH + '" rx="' + (barH / 2).toFixed(1) + '" fill="' + fill + '"/>';
+      if (valW > 0) s += '<text x="' + (W - padX) + '" y="' + cy.toFixed(1) + '" text-anchor="end" dominant-baseline="central" style="fill:var(--ink);font-size:12.5px;font-weight:800;font-variant-numeric:tabular-nums">' + esc(it.valText != null ? it.valText : valFmt(it.value)) + "</text>";
+      s += '<rect x="0" y="' + y0.toFixed(1) + '" width="' + W + '" height="' + rowH + '" fill="transparent"/>';
+      s += "</g>";
+    });
+    s += "</svg>";
+    host.innerHTML = s;
+
+    var svg = host.querySelector("svg");
+    var tip = document.createElement("div"); tip.className = "chart-tip"; tip.style.display = "none";
+    host.style.position = host.style.position || "relative"; host.appendChild(tip);
+    [].forEach.call(svg.querySelectorAll(".hbrow"), function (g) {
+      var it = items[+g.getAttribute("data-i")], id = g.getAttribute("data-id");
+      var hl = g.querySelector(".hbrow-hl");
+      g.addEventListener("mouseenter", function () { if (hl) hl.setAttribute("opacity", "1"); if (opts.onEnter && id != null) opts.onEnter(id); });
+      g.addEventListener("mouseleave", function () { if (hl) hl.setAttribute("opacity", "0"); tip.style.display = "none"; if (opts.onLeave && id != null) opts.onLeave(id); });
+      g.addEventListener("mousemove", function (e) {
+        tip.innerHTML = opts.tipHtml ? opts.tipHtml(it) : '<div class="r"><i style="background:' + (it.color || COL.blue) + '"></i>' + esc(it.label) + ": <b>" + esc(valFmt(it.value)) + "</b></div>";
+        tip.style.display = "block"; positionTip(tip, host, e);
+      });
+    });
+    return { svg: svg };
+  }
+
+  // ---- Horizontal category bars (now SVG, so they're exportable) ------------
   function hBars(items, opts) {
-    opts = opts || {}; if (!items.length) return '<p class="muted small">No data.</p>';
-    var max = Math.max.apply(null, items.map(function (i) { return i.value; })) || 1;
-    return '<div>' + items.map(function (it) {
-      return '<div title="' + esc(it.label + ": " + it.value) + '" style="display:flex;align-items:center;gap:10px;margin:6px 0">' +
-        '<div class="small" style="width:' + (opts.labelW || 120) + 'px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(it.label) + "</div>" +
-        '<div class="bar-mini" style="flex:1"><i style="width:' + (it.value / max * 100) + "%;background:" + (it.color || COL.blue) + '"></i></div>' +
-        '<div class="small" style="width:52px;text-align:right;font-variant-numeric:tabular-nums">' + fmt(it.value) + "</div></div>";
-    }).join("") + "</div>";
+    opts = opts || {};
+    return chart(function (host) {
+      svgHBars(host, items, { labelW: opts.labelW || 120, barH: 7, valW: 52, labelColor: "muted", fill: "item", empty: "No data." });
+    });
+  }
+
+  // ===========================================================================
+  // PROCESS-MAP SVG PRIMITIVES (pill chains) — so the process/sequence views on
+  // the Process tab export like every other chart. These rebuild the exact pill
+  // look (rounded chips, → arrows, frequency bars) as self-contained inline SVG.
+  // ===========================================================================
+  var ARROW = "→";
+  function pillFont(sm) { return (sm ? "700 12px " : "800 13px ") + "Nunito, system-ui, sans-serif"; }
+  function pillWidth(text, sm) { return Math.max(sm ? 30 : 34, Math.ceil(measureTextW(text, pillFont(sm))) + (sm ? 22 : 28)); }
+  function pillH(sm) { return sm ? 24 : 28; }
+  // Solid coloured activity pill. Returns { str, w }.
+  function svgPill(x, cy, text, bg, ink, sm) {
+    var h = pillH(sm), w = pillWidth(text, sm), r = h / 2, y = cy - h / 2, fs = sm ? 12 : 13, fw = sm ? 700 : 800;
+    var str = '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + w + '" height="' + h + '" rx="' + r + '" fill="' + bg + '"/>' +
+      '<text x="' + (x + w / 2).toFixed(1) + '" y="' + cy.toFixed(1) + '" text-anchor="middle" dominant-baseline="central" style="fill:' + ink + ';font-size:' + fs + 'px;font-weight:' + fw + '">' + esc(text) + "</text>";
+    return { str: str, w: w };
+  }
+  // Neutral "+N more" pill (bordered, muted) for capped chains. Returns { str, w }.
+  function svgMorePill(x, cy, text, sm) {
+    var h = pillH(sm), w = pillWidth(text, sm), r = h / 2, y = cy - h / 2, fs = sm ? 12 : 12;
+    var str = '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + w + '" height="' + h + '" rx="' + r + '" style="fill:var(--bg2);stroke:var(--line)" stroke-width="1"/>' +
+      '<text x="' + (x + w / 2).toFixed(1) + '" y="' + cy.toFixed(1) + '" text-anchor="middle" dominant-baseline="central" style="fill:var(--muted);font-size:' + fs + 'px;font-weight:700">' + esc(text) + "</text>";
+    return { str: str, w: w };
+  }
+  function arrowAt(x, cy) { return '<text x="' + x.toFixed(1) + '" y="' + cy.toFixed(1) + '" text-anchor="middle" dominant-baseline="central" style="fill:var(--muted2);font-size:15px">' + ARROW + "</text>"; }
+  // Clickable "+N more" / "show less" toggle pill. Returns { str, w }.
+  function seqToggle(x, cy, text, ri) { var mp = svgMorePill(x, cy, text, false); return { str: '<g class="seq-toggle" data-ri="' + ri + '" style="cursor:pointer">' + mp.str + "</g>", w: mp.w }; }
+
+  // Lay out a pill chain that WRAPS onto multiple lines within [x0, xRight],
+  // keeping every pill at its natural (readable) size. Line l is centred at
+  // firstCy + l*lineH. Returns { str, nLines, endX, endLine } — endX/endLine
+  // mark where the last pill ended so a caller can append a trailing toggle.
+  function wrapChain(x0, xRight, firstCy, lineH, tokens, colorFn, labelFn, sm, cap) {
+    var parts = [], x = x0, line = 0, n = tokens.length, lim = cap ? Math.min(n, cap) : n;
+    function cy() { return firstCy + line * lineH; }
+    function place(text, bg, ink, more) {
+      var w = pillWidth(text, sm);
+      if (x > x0) {                                   // not at line start
+        if (x + 32 + w <= xRight) { parts.push(arrowAt(x + 16, cy())); x += 32; } // same line
+        else { line++; x = x0; }                      // wrap to next line
+      }
+      var p = more ? svgMorePill(x, cy(), text, sm) : svgPill(x, cy(), text, bg, ink, sm);
+      parts.push(p.str); x += p.w;
+    }
+    for (var i = 0; i < lim; i++) { var c = colorFn(tokens[i]); place(labelFn(tokens[i]), c, inkOn(c), false); }
+    if (n > lim) place("+" + (n - lim), null, null, true);
+    return { str: parts.join(""), nLines: line + 1, endX: x, endLine: line };
+  }
+
+  // Flagship "Common event sequences": rank · pill chain · freq bar. Each trace
+  // renders on a SINGLE line by default, truncated with a clickable "+N more"
+  // toggle; clicking expands it to the full wrapped, multi-line chain (and back
+  // via "show less"). Per-row expand state lives on the host so it survives the
+  // in-place re-render the toggle triggers. Width is measured so pills stay 1:1.
+  function svgSeqChains(host, variants, colorFn, labelFn, fmtCount, fmtCov) {
+    if (!variants || !variants.length) { host.innerHTML = '<p class="muted small">No sequences in range.</p>'; return; }
+    var exp = host.__seqExp || (host.__seqExp = {});
+    var CAP = 60, pillH0 = pillH(false), lineH = pillH0 + 9, padTop = 11, padBot = 11;
+    var gradId = "seqgrad" + (++_gradSeq);
+
+    function build(forExport) {
+      var W = Math.max(360, Math.round(host.clientWidth || (host.getBoundingClientRect && host.getBoundingClientRect().width) || 720));
+      var rankX = 4, chainX0 = rankX + 22 + 14, fbarW = 96, freqW = fbarW + 12 + 70;
+      var freqX = W - freqW, chainRight = freqX - 14, maxCount = variants[0].count || 1;
+      // Per-variant descriptor: { nLines, render(firstCy) -> svg string }.
+      var laid = variants.map(function (vr, ri) {
+        var seq = vr.sequence, n = seq.length;
+        if (forExport) {                               // static export: full wrap, no toggle
+          var dryX = wrapChain(chainX0, chainRight, 0, lineH, seq, colorFn, labelFn, false, CAP);
+          return { nLines: dryX.nLines, render: function (firstCy) { return wrapChain(chainX0, chainRight, firstCy, lineH, seq, colorFn, labelFn, false, CAP).str; } };
+        }
+        if (exp[ri]) {                                 // expanded: full wrap + "show less"
+          var dry = wrapChain(chainX0, chainRight, 0, lineH, seq, colorFn, labelFn, false, CAP);
+          var same = dry.endX + 14 + pillWidth("show less", false) <= chainRight;
+          return { nLines: dry.nLines + (same ? 0 : 1), render: function (firstCy) {
+            var r = wrapChain(chainX0, chainRight, firstCy, lineH, seq, colorFn, labelFn, false, CAP);
+            var tx = same ? r.endX + 14 : chainX0, tl = same ? r.endLine : r.nLines;
+            return r.str + seqToggle(tx, firstCy + tl * lineH, "show less", ri).str;
+          } };
+        }
+        var widths = seq.map(function (t) { return pillWidth(labelFn(t), false); });
+        var fullEnd = chainX0; for (var i = 0; i < n; i++) { if (i) fullEnd += 32; fullEnd += widths[i]; }
+        if (fullEnd <= chainRight) {                   // whole trace already fits one line
+          return { nLines: 1, render: function (firstCy) { return chainLine(chainX0, firstCy, seq, colorFn, labelFn, false).str; } };
+        }
+        var reserve = pillWidth("+" + n + " more", false) + 14, placed = 0, x = chainX0;
+        for (var j = 0; j < n; j++) {                  // fit pills, leaving room for the toggle
+          if (placed > 0 && x + 32 + widths[j] + reserve > chainRight) break;
+          if (placed) x += 32;
+          x += widths[j]; placed++;
+        }
+        var shown = seq.slice(0, placed), hidden = n - placed;
+        return { nLines: 1, render: function (firstCy) {
+          var r = chainLine(chainX0, firstCy, shown, colorFn, labelFn, false);
+          return r.str + seqToggle(r.end + 14, firstCy, "+" + hidden + " more", ri).str;
+        } };
+      });
+      var tops = [], y = 0;
+      laid.forEach(function (l) { var bh = padTop + padBot + (l.nLines - 1) * lineH + pillH0; tops.push({ top: y, h: bh }); y += bh; });
+      var s = '<svg viewBox="0 0 ' + W + " " + y + '" class="ichart seqmap-svg" preserveAspectRatio="xMinYMin meet">';
+      s += '<defs><linearGradient id="' + gradId + '" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="' + COL.gold + '"/><stop offset="1" stop-color="' + COL.green + '"/></linearGradient></defs>';
+      variants.forEach(function (vr, ri) {
+        var b = tops[ri], firstCy = b.top + padTop + pillH0 / 2, midCy = b.top + b.h / 2;
+        if (ri) s += '<line x1="0" y1="' + b.top.toFixed(1) + '" x2="' + W + '" y2="' + b.top.toFixed(1) + '" style="stroke:var(--line)"/>';
+        s += '<rect x="' + rankX + '" y="' + (midCy - 11).toFixed(1) + '" width="22" height="22" rx="7" style="fill:var(--bg2);stroke:var(--line)" stroke-width="1"/>' +
+          '<text x="' + (rankX + 11) + '" y="' + midCy.toFixed(1) + '" text-anchor="middle" dominant-baseline="central" style="fill:var(--muted);font-size:11px;font-weight:800">' + (ri + 1) + "</text>";
+        s += laid[ri].render(firstCy);
+        var w = Math.max(2, (vr.count / maxCount) * fbarW);
+        s += '<rect x="' + freqX + '" y="' + (midCy - 4).toFixed(1) + '" width="' + fbarW + '" height="8" rx="5" style="fill:var(--line)"/>';
+        s += '<rect x="' + freqX + '" y="' + (midCy - 4).toFixed(1) + '" width="' + w.toFixed(1) + '" height="8" rx="5" fill="url(#' + gradId + ')"/>';
+        s += '<text x="' + (freqX + fbarW + 12) + '" y="' + (midCy - 6).toFixed(1) + '" dominant-baseline="central" style="fill:var(--ink);font-size:13px;font-weight:800;font-variant-numeric:tabular-nums">' + esc(fmtCount(vr.count)) + "</text>";
+        s += '<text x="' + (freqX + fbarW + 12) + '" y="' + (midCy + 9).toFixed(1) + '" dominant-baseline="central" style="fill:var(--muted);font-size:11px;font-weight:600">' + esc(fmtCov(vr.coverage)) + "</text>";
+      });
+      var full = s + "</svg>";
+      if (forExport) return full;
+      host.innerHTML = full;
+      // Expose a toggle-free, fully-expanded SVG element for the export path.
+      var live = host.querySelector("svg.seqmap-svg");
+      if (live) live.__exportBuild = function () { var t = document.createElement("div"); t.innerHTML = build(true); return t.firstChild; };
+    }
+
+    if (!host.__seqBound) {
+      host.__seqBound = true;
+      host.addEventListener("click", function (e) {
+        var t = e.target && e.target.closest ? e.target.closest(".seq-toggle") : null;
+        if (!t || !host.contains(t)) return;
+        var ri = t.getAttribute("data-ri");
+        if (exp[ri]) delete exp[ri]; else exp[ri] = true;
+        build();
+      });
+    }
+    build();
+  }
+
+  // Single-line pill chain from x0 (no wrapping); returns { str, end }.
+  function chainLine(x0, cy, tokens, colorFn, labelFn, sm) {
+    var parts = [], x = x0;
+    for (var i = 0; i < tokens.length; i++) {
+      if (i) { parts.push('<text x="' + (x + 16).toFixed(1) + '" y="' + cy.toFixed(1) + '" text-anchor="middle" dominant-baseline="central" style="fill:var(--muted2);font-size:15px">' + ARROW + "</text>"); x += 32; }
+      var c = colorFn(tokens[i]), p = svgPill(x, cy, labelFn(tokens[i]), c, inkOn(c), sm); parts.push(p.str); x += p.w;
+    }
+    return { str: parts.join(""), end: x };
+  }
+
+  // "Directly-follows" / "Start-end" rows: small pill chain · bar · count, each
+  // ALWAYS on one line. The freq bars line up just past the longest chain; if a
+  // chain runs wider than the card the whole SVG scales down a touch (still
+  // legible) rather than wrapping — 2/3/4-step chains stay in a single row.
+  function svgTransRows(host, rows, colorFn, labelFn, fmtCount, opts) {
+    opts = opts || {};
+    if (!rows || !rows.length) { host.innerHTML = '<p class="muted small">' + (opts.empty || "None.") + "</p>"; return; }
+    var pillHs = pillH(true), rowH = pillHs + 14, topPad = 2, x0 = 4, barW = 84, valW = 52, gap = 14;
+    var measuredW = Math.max(280, Math.round(host.clientWidth || (host.getBoundingClientRect && host.getBoundingClientRect().width) || 360));
+    var maxEnd = rows.reduce(function (m, r) { return Math.max(m, chainLine(x0, 0, r.tokens, colorFn, labelFn, true).end); }, x0);
+    var gutter = barW + 12 + valW, barX = Math.max(maxEnd + gap, measuredW - gutter - 4);
+    var W = Math.max(measuredW, barX + gutter + 4), valX = barX + barW + 12 + valW, H = topPad * 2 + rows.length * rowH;
+    var maxCount = rows.reduce(function (m, r) { return Math.max(m, r.count); }, 0) || 1;
+    var s = '<svg viewBox="0 0 ' + W + " " + H + '" class="ichart seqmap-svg" preserveAspectRatio="xMinYMin meet">';
+    rows.forEach(function (r, ri) {
+      var cy = topPad + ri * rowH + rowH / 2;
+      s += chainLine(x0, cy, r.tokens, colorFn, labelFn, true).str;
+      var w = Math.max(2, (r.count / maxCount) * barW), c = colorFn(r.tokens[r.tokens.length - 1]);
+      s += '<rect x="' + barX + '" y="' + (cy - 3.5).toFixed(1) + '" width="' + barW + '" height="7" rx="4" style="fill:var(--line)"/>';
+      s += '<rect x="' + barX + '" y="' + (cy - 3.5).toFixed(1) + '" width="' + w.toFixed(1) + '" height="7" rx="4" fill="' + c + '"/>';
+      s += '<text x="' + valX + '" y="' + cy.toFixed(1) + '" text-anchor="end" dominant-baseline="central" style="fill:var(--ink);font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums">' + esc(fmtCount(r.count)) + "</text>";
+    });
+    s += "</svg>";
+    host.innerHTML = s;
   }
 
   // ---- Research charts: numeric-axis line + XY scatter + Lorenz curve -------
@@ -587,7 +830,7 @@
     R = R || {};
     var lc = R.learningCurve || [], ef = R.effort || {}, ret = R.retention || [], en = R.engagement || {};
     var needScore = '<p class="muted small">Needs per-run score data. Import a <b>Score</b>/<b>Stars</b> column, or use a game that records scores.</p>';
-    var html = '<div class="section-head"><h2>Research analytics</h2><span class="small muted">Learning-analytics metrics derived from the generic event + score log — useful across serious games.</span></div>';
+    var html = '<div class="section-head"><h2>Research analytics</h2><span class="small muted">Learning-analytics metrics derived from the generic event + score log.</span></div>';
     // Scores are game-specific (0–1, 0–100, points…), so format numerically rather
     // than as a percentage. Compact: integers plain, small values to 2 decimals.
     var numFmt = function (v) { return v == null ? "—" : (Math.abs(v) >= 10 ? fmt(Math.round(v)) : dec(v, 2)); };
@@ -662,85 +905,49 @@
       html += '<div class="card" style="padding:14px 17px"><div class="card-head" style="margin-bottom:9px"><h3>Activities</h3><span class="pill">' + acts.length + ' types</span></div>' +
         '<div class="act-legend">' + acts.map(function (a) { return pill(a.type) + '<span class="small muted" style="margin:0 10px 0 -3px;align-self:center">' + fmt(a.count) + '</span>'; }).join("") + '</div></div>';
 
-      // Flagship: trace variants as pill chains (the "event sequences" view).
-      var maxV = (d.variants && d.variants[0]) ? d.variants[0].count : 1, cap = 16;
-      var vrows = (d.variants || []).map(function (vr, ri) {
-        var chain = vr.sequence, shown = chain.slice(0, cap);
-        var ch = shown.map(function (t, i) { return (i ? '<span class="seqarrow">→</span>' : "") + pill(t); }).join("");
-        if (chain.length > cap) {
-          // Overflow steps live in the DOM but collapsed; a click reveals the
-          // full raw trace (and a "show less" folds it back).
-          var rest = chain.slice(cap).map(function (t) { return '<span class="seqarrow">→</span>' + pill(t); }).join("");
-          ch += '<span class="seqarrow seqmore-arrow">→</span>' +
-            '<button type="button" class="seqmore" aria-expanded="false">+' + (chain.length - cap) + ' more</button>' +
-            '<span class="seqrest" hidden>' + rest +
-            ' <button type="button" class="seqless">show less</button></span>';
-        }
-        return '<div class="seqrow"><span class="seqrank">' + (ri + 1) + '</span><div class="seqchain">' + ch + '</div>' +
-          '<div class="seqfreq"><div class="fbar"><i style="width:' + (vr.count / maxV * 100) + '%"></i></div>' +
-          '<div class="fn">' + fmt(vr.count) + ' <small>· ' + pct(vr.coverage) + '</small></div></div></div>';
-      }).join("");
+      // Flagship: trace variants as pill chains, drawn as an exportable <svg>
+      // (full raw traces on one line; the card scrolls horizontally).
       html += card("Common event sequences", "The distinct paths sessions take through the game, ranked by how many sessions follow each (full raw traces, repeated loops are shown in full).",
-        (d.variants && d.variants.length) ? vrows : '<p class="muted small">No sequences in range.</p>');
+        '<div id="seqMap"></div>');
 
       // Directly-follows transitions + start/end activities.
       html += '<div class="grid2">';
       // Chains of 2/3/4 consecutive activities. All three step lengths ship in
       // one response, so switching is instant and never re-queries the DB.
       var byN = d.transitionsByN || { 2: d.transitions || [] };
-      function dfgRows(n) {
-        var list = byN[n] || [];
-        if (!list.length) return '<p class="muted small">No ' + n + '-step chains in range.</p>';
-        var mx = list[0].count || 1;
-        return list.map(function (tr) {
-          var seq = tr.seq || [tr.from, tr.to];
-          var chain = seq.map(function (t, i) { return (i ? '<span class="seqarrow">→</span>' : "") + pill(t, 1); }).join("");
-          return '<div class="trow"><div class="seqchain">' + chain + '</div>' +
-            '<div class="tn" style="flex:none;width:88px"><i style="width:' + (tr.count / mx * 100) + '%;background:' + ac(seq[seq.length - 1]) + '"></i></div>' +
-            '<div class="tv">' + fmt(tr.count) + '</div></div>';
-        }).join("");
+      function dfgItems(n) {
+        return (byN[n] || []).map(function (tr) { return { tokens: tr.seq || [tr.from, tr.to], count: tr.count }; });
       }
       var dfgHead = '<div class="card-head"><h3>Directly-follows transitions</h3>' +
         '<span class="spacer"></span><div class="seg sm" id="dfgSteps">' +
         [2, 3, 4].map(function (n) { return '<button class="chip' + (n === 2 ? " active" : "") + '" data-n="' + n + '">' + n + '-step</button>'; }).join("") + '</div></div>';
       html += '<div class="card">' + dfgHead +
         '<p class="cap">How often a run of activities occurs back-to-back (self-loops included). 2-step is the backbone of the process graph; 3- and 4-step reveal longer recurring routines.</p>' +
-        '<div id="dfgBody">' + dfgRows(2) + '</div></div>';
+        '<div id="dfgBody"></div></div>';
 
-      function seList(list) {
-        if (!list || !list.length) return '<p class="muted small">None.</p>';
-        var mx = list[0].count || 1;
-        return list.map(function (a) { return '<div class="trow">' + pill(a.type, 1) + '<div class="tn"><i style="width:' + (a.count / mx * 100) + '%;background:' + ac(a.type) + '"></i></div><div class="tv">' + fmt(a.count) + '</div></div>'; }).join("");
-      }
       html += card("Start and end activities", "Where sessions begin and where they end — entry points and exit points of the process.",
-        '<h4>First activity</h4>' + seList(d.startActivities) + '<h4 style="margin-top:15px">Last activity</h4>' + seList(d.endActivities));
+        '<h4>First activity</h4><div id="seStart"></div><h4 style="margin-top:15px">Last activity</h4><div id="seEnd"></div>');
       html += "</div>";
 
       v.innerHTML = html;
 
-      // Directly-follows step selector: swap the list locally (no re-fetch).
-      var dfgSeg = v.querySelector("#dfgSteps"), dfgBody = v.querySelector("#dfgBody");
+      // ---- mount the process maps as inline SVG (exportable like every chart)
+      var covFmt = function (c) { return "· " + pct(c); };
+      svgSeqChains(v.querySelector("#seqMap"), d.variants || [], ac, prettyAct, fmt, covFmt);
+      function drawDFG(n) { svgTransRows(v.querySelector("#dfgBody"), dfgItems(n), ac, prettyAct, fmt, { empty: "No " + n + "-step chains in range." }); }
+      drawDFG(2);
+      var seItems = function (list) { return (list || []).map(function (a) { return { tokens: [a.type], count: a.count }; }); };
+      svgTransRows(v.querySelector("#seStart"), seItems(d.startActivities), ac, prettyAct, fmt, { empty: "None." });
+      svgTransRows(v.querySelector("#seEnd"), seItems(d.endActivities), ac, prettyAct, fmt, { empty: "None." });
+
+      // Directly-follows step selector: re-render the SVG locally (no re-fetch).
+      var dfgSeg = v.querySelector("#dfgSteps");
       if (dfgSeg) [].forEach.call(dfgSeg.querySelectorAll("[data-n]"), function (b) {
         b.addEventListener("click", function () {
           [].forEach.call(dfgSeg.querySelectorAll("[data-n]"), function (x) { x.classList.remove("active"); });
           b.classList.add("active");
-          dfgBody.innerHTML = dfgRows(parseInt(b.getAttribute("data-n"), 10));
+          drawDFG(parseInt(b.getAttribute("data-n"), 10));
         });
-      });
-
-      // Expand / collapse the truncated trace variants ("+N more" → full trace).
-      v.addEventListener("click", function (e) {
-        var chain = e.target.closest && e.target.closest(".seqchain");
-        if (!chain) return;
-        if (e.target.classList.contains("seqmore")) {
-          chain.querySelector(".seqmore-arrow").hidden = true;
-          e.target.hidden = true;
-          chain.querySelector(".seqrest").hidden = false;
-        } else if (e.target.classList.contains("seqless")) {
-          chain.querySelector(".seqrest").hidden = true;
-          chain.querySelector(".seqmore-arrow").hidden = false;
-          chain.querySelector(".seqmore").hidden = false;
-        }
       });
     }).catch(errBox(v));
   }
@@ -1282,7 +1489,7 @@
 
   var SuiteDash = {
     lineChart: lineChart, funnelChart: funnelChart, donutChart: donutChart, barChart: barChart,
-    hBars: hBars, legendRow: legendRow, tile: tile, miniTile: miniTile, card: card,
+    hBars: hBars, svgHBars: svgHBars, flushCharts: flushCharts, legendRow: legendRow, tile: tile, miniTile: miniTile, card: card,
     selectBox: selectBox,
     esc: esc, fmt: fmt, pct: pct, dec: dec, COL: COL,
   };

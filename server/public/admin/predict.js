@@ -189,16 +189,14 @@
     // ---- Global importance (signed horizontal bars) ------------------------
     (function drawImportance() {
       var mount = container.querySelector("#pImp");
-      var items = data.importance.slice(0, 14).filter(function (f) { return f.meanAbsShap > 0; });
-      if (!items.length) { mount.innerHTML = '<p class="muted small">No non-zero importances.</p>'; return; }
-      var max = items[0].meanAbsShap || 1;
-      mount.innerHTML = '<div class="pred-hbars">' + items.map(function (f) {
-        var col = f.meanSignedShap >= 0 ? COL.red : COL.blue, w = Math.max(2, f.meanAbsShap / max * 100);
-        return '<div class="tna-hbar" title="' + esc(prettyFeat(f.feature)) + ' · mean|SHAP| ' + dec(f.meanAbsShap, 4) + ' · direction ' + (f.meanSignedShap >= 0 ? "+" : "") + dec(f.meanSignedShap, 4) + '">' +
-          '<div class="hb-name" style="color:' + col + '">' + esc(prettyFeat(f.feature)) + "</div>" +
-          '<div class="hb-track"><i style="width:' + w.toFixed(1) + "%;background:" + col + '"></i></div>' +
-          '<div class="hb-val">' + dec(f.meanAbsShap, 4) + "</div></div>";
-      }).join("") + "</div>";
+      var items = data.importance.slice(0, 14).filter(function (f) { return f.meanAbsShap > 0; }).map(function (f) {
+        return { label: prettyFeat(f.feature), value: f.meanAbsShap, color: f.meanSignedShap >= 0 ? COL.red : COL.blue, signed: f.meanSignedShap };
+      });
+      D.svgHBars(mount, items, {
+        labelColor: "item", fill: "item", empty: "No non-zero importances.",
+        valFmt: function (v) { return dec(v, 4); },
+        tipHtml: function (it) { return '<div class="r"><i style="background:' + it.color + '"></i>' + esc(it.label) + "</div><div class=\"small\">mean|SHAP| <b>" + dec(it.value, 4) + "</b> · direction " + (it.signed >= 0 ? "+" : "") + dec(it.signed, 4) + "</div>"; },
+      });
     })();
 
     // ---- Beeswarm ----------------------------------------------------------
