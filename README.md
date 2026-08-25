@@ -22,7 +22,7 @@
 
 ---
 
-**Ludix** is a platform for studying how people learn inside serious games. It hosts a suite of
+**Ludix** is a platform for building serious games and analysing how they are played, all in one place, from the games themselves to reproducible learning analytics over the play they generate. It hosts a suite of
 games, records how each one is played, and turns that activity into learning analytics that researchers can reproduce and report.
 
 What makes it more than a descriptive dashboard is that it is also **inferential**. Alongside the
