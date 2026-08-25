@@ -55,7 +55,8 @@ commitments aimed squarely at the research community:
   implementations rather than re-derived: transition-network analysis, centralities, bootstrap edge
   validation and dissimilarity clustering come from **[ladyna](https://github.com/mohsaqr/tna-js)**,
   a machine-precision-validated JavaScript port of the R [`tna`](https://cran.r-project.org/package=tna)
-  package; feature attribution uses **exact path-dependent TreeSHAP** (Lundberg et al.). Randomised
+  package [[1]](#references) [[2]](#references); feature attribution uses **exact path-dependent
+  TreeSHAP** [[3]](#references) [[4]](#references). Randomised
   procedures (bootstrap, clustering, train/test splits) share one seeded generator, so results are
   reproducible.
 - **Publication-ready outputs.** Every chart, network and plot is hand-drawn inline SVG and can be
@@ -104,7 +105,8 @@ directed edge A→B carries the transition probability *P(B | A)*. The view deri
 probabilities**, the full R-`tna` set of **node/edge centralities** (out/in-strength, betweenness,
 closeness, PageRank, …), a **sequence index plot**, **state cliques**, and optional **bootstrap edge
 validation** — which transitions are statistically stable rather than noise. TNA is a recent
-learning-analytics method; Ludix makes it available game-agnostically and interactively.
+learning-analytics method [[1]](#references); Ludix makes it available game-agnostically and
+interactively.
 
 <div align="center">
 <img alt="Transition network analysis" src="docs/img/tna-network.jpg" width="92%">
@@ -160,29 +162,38 @@ re-imports exactly, so datasets and figures are shareable and reproducible.
 
 ## Methods & reproducibility
 
-- **Validated statistics.** TNA models, centralities, bootstrap validation and dissimilarity
-  clustering come from [ladyna](https://github.com/mohsaqr/tna-js) (a JS port of R `tna`, validated
-  to machine precision against the original); process discovery uses its `processmining` module.
-- **Exact explanations.** Feature attribution is exact path-dependent **TreeSHAP** (Lundberg &
-  Lee); the additive invariant *baseValue + Σ φᵢ = model output* holds per instance.
-- **Determinism.** Bootstrap, clustering and train/test subsampling share a single seeded PRNG
-  (mulberry32), so a given dataset and settings reproduce the same figures.
-- **Standard event model.** All analyses derive from a `case · activity · timestamp · actor`
-  envelope, aligning with process-mining/EDM conventions and enabling cross-game and external-log
-  reuse.
-- **Named methods** used across the suite include directly-follows process discovery and trace
-  variants, first-order Markov transition networks, PageRank/betweenness/closeness centralities,
-  silhouette-validated PAM/hierarchical/k-means clustering over sequence dissimilarities,
-  gradient-boosted trees with TreeSHAP, OLS/logistic effect estimation with Benjamini–Hochberg
-  correction, and permutation testing for network contrasts.
+A short note on how much of this you can trust, and why the numbers hold up.
+
+- **We don't reinvent the statistics.** The transition networks, centralities, edge validation and
+  sequence clustering are computed by [ladyna](https://github.com/mohsaqr/tna-js) [[2]](#references),
+  a JavaScript port of the R [`tna`](https://cran.r-project.org/package=tna) package
+  [[1]](#references) that is checked against the original to machine precision; the process maps come
+  from the same library.
+- **The model explanations are exact, not approximate.** Feature importance uses **SHAP / TreeSHAP**
+  [[3]](#references) [[4]](#references), which traces each prediction back to the inputs that produced
+  it — and the pieces always add up to the model's output, so nothing is hand-waved.
+- **Re-running gives the same answer.** Anything with a random step in it — the bootstrap, the
+  clustering, the train/test split — is driven by a fixed seed, so the same data and the same
+  settings reproduce the same figures.
+- **Everything rests on one simple event shape.** An event is just *who* did *what*, *when*, in
+  *which* session (actor · activity · timestamp · case) — the same shape process-mining tools expect
+  [[8]](#references) — which is exactly why the analyses move freely between games and accept data
+  from outside Ludix.
+- **The methods are standard ones, not homemade.** Under the hood: directly-follows process
+  discovery and trace variants [[8]](#references); first-order Markov transition networks
+  [[1]](#references); the usual network centralities; k-medoids / hierarchical / k-means clustering
+  [[6]](#references) over sequence distances, checked with a silhouette score [[5]](#references);
+  gradient-boosted trees read through SHAP [[3]](#references) [[4]](#references); plain OLS / logistic
+  effect estimates with a Benjamini–Hochberg correction when many patterns are tested at once
+  [[7]](#references); and a permutation test for comparing two networks.
 
 ## Design
 
-- **One backend for every game:** a small, game-agnostic Node/Express/SQLite server hosts the whole suite; the database is a single SQLite file created on boot (no migration step).
-- **No per-game analytics code:** games post runs and events keyed by `gameId`; engagement, process mining, TNA, clustering and prediction all follow from the generic envelope.
-- **No-build dashboard:** the `/admin` UI (charts, networks, clustering, SHAP) is hand-written inline SVG — no bundler, no CDN, no client framework — so it is auditable and dependency-light.
-- **Copy-to-extend:** duplicating the template yields a game already wired into identity, scoring, the leaderboard, and analytics; any built game with an `index.html` appears on the landing page.
-- **Password-free identity:** a learner claims a unique name once and receives a private token; only the token holder can submit under it — appropriate for classroom use without account management.
+- **One server for every game.** A single small Node/Express/SQLite backend runs the whole suite. There is one database file, created automatically the first time you start it — nothing to migrate or set up.
+- **The analytics don't care which game sent the data.** Games just report runs and events tagged with a game id; engagement, process mining, network analysis, clustering and prediction all work off that shared stream, so adding a game adds no analytics code.
+- **The dashboard has no build step.** Its charts, networks and SHAP plots are drawn as plain inline SVG — no bundler, no CDN, no front-end framework — which keeps it easy to read, host, and check for yourself.
+- **Adding a game means copying the template.** The copy already knows how to sign a player in, record scores, feed the leaderboard, and stream analytics; anything you build with an `index.html` shows up on the landing page.
+- **No passwords for learners.** A student picks a unique name once and gets a private token that lets only them submit under it — simple enough for a classroom, with no accounts to manage.
 
 <div align="center">
 <img alt="Ludix learner landing page" src="docs/img/landing.jpg" width="80%">
@@ -258,6 +269,21 @@ Source (`games/`) is built into served bundles (`dist/`). Each `dist/` subfolder
 - Server and API: [`server/README.md`](server/README.md) (endpoints, config, deploy)
 - Quick Tap, the reference game: [`games/quick-tap/README.md`](games/quick-tap/README.md)
 - Adding a game: [`games/_template/README.md`](games/_template/README.md)
+
+## References
+
+The methods and libraries Ludix builds on:
+
+1. **`tna` — Transition Network Analysis** (R package). Saqr, M., López-Pernas, S., et al. CRAN: <https://cran.r-project.org/package=tna>
+2. **ladyna / `tna-js`** — JavaScript port of `tna` used by Ludix. <https://github.com/mohsaqr/tna-js>
+3. Lundberg, S. M., & Lee, S.-I. (2017). *A Unified Approach to Interpreting Model Predictions.* NeurIPS. arXiv:[1705.07874](https://arxiv.org/abs/1705.07874)
+4. Lundberg, S. M., et al. (2020). *From local explanations to global understanding with explainable AI for trees* (TreeSHAP). *Nature Machine Intelligence*, 2, 56–67.
+5. Rousseeuw, P. J. (1987). *Silhouettes: a graphical aid to the interpretation and validation of cluster analysis.* *Journal of Computational and Applied Mathematics*, 20, 53–65.
+6. Kaufman, L., & Rousseeuw, P. J. (1990). *Finding Groups in Data: An Introduction to Cluster Analysis* (PAM / k-medoids). Wiley.
+7. Benjamini, Y., & Hochberg, Y. (1995). *Controlling the False Discovery Rate.* *Journal of the Royal Statistical Society: Series B*, 57(1), 289–300.
+8. van der Aalst, W. M. P. (2016). *Process Mining: Data Science in Action.* Springer.
+
+Runtime dependencies: [Node.js](https://nodejs.org), [Express](https://expressjs.com), and [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3).
 
 ## Contributing
 
