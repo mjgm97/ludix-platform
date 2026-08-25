@@ -675,10 +675,22 @@
   }
 
   // ---- Custom player dropdown (searchable, synced to a hidden input) --------
+  // A reusable factory so the same searchable multi-select is used by BOTH the
+  // global filter bar and the report builder. `opts` supplies the element refs
+  // and an `onChange` callback (the filter bar re-renders; the report builder
+  // just notes the change) so the component itself stays UI-only.
   var userDD = null;
   function initPlayerDropdown() {
-    var btn = $("#userBtn"), menu = $("#userMenu"), wrap = $("#userDD"), hidden = $("#fUser"),
-      label = $("#userBtnLabel"), searchIn = $("#userSearchIn"), list = $("#userList");
+    return createPlayerDropdown({
+      btn: $("#userBtn"), menu: $("#userMenu"), wrap: $("#userDD"), hidden: $("#fUser"),
+      label: $("#userBtnLabel"), searchIn: $("#userSearchIn"), list: $("#userList"),
+      onChange: function () { readFilters(); render(); },
+    });
+  }
+  function createPlayerDropdown(opts) {
+    var btn = opts.btn, menu = opts.menu, wrap = opts.wrap, hidden = opts.hidden,
+      label = opts.label, searchIn = opts.searchIn, list = opts.list,
+      onChange = opts.onChange || function () {};
     // Selection is a comma-joined list of usernames (multi-select). Helpers keep
     // it deduped case-insensitively and in a stable order.
     function selected() { return hidden.value.split(",").map(function (s) { return s.trim(); }).filter(Boolean); }
@@ -722,7 +734,7 @@
           var u = o.getAttribute("data-u");
           if (!u) setSelected([]);      // "All players" clears the whole selection
           else toggle(u);               // toggle one player; menu stays open for more
-          paint(); readFilters(); render();
+          paint(); onChange();
           paintList(searchIn.value);    // refresh checkmarks in place
         });
       });
@@ -737,7 +749,12 @@
       if (e.key === "Enter") { e.preventDefault(); var first = list.querySelector("[data-u]"); if (first) first.click(); }
     });
     document.addEventListener("keydown", function (e) { if (e.key === "Escape") close(); });
-    return { refresh: paint, rebuild: function () { paint(); if (menu.classList.contains("open")) paintList(searchIn.value); } };
+    return {
+      refresh: paint,
+      rebuild: function () { paint(); if (menu.classList.contains("open")) paintList(searchIn.value); },
+      getSelected: selected,
+      setSelected: function (arr) { setSelected(arr || []); paint(); },
+    };
   }
 
   // =========================================================================
@@ -1140,16 +1157,155 @@
   }
 
   // ---- Export ---------------------------------------------------------------
+  // One integrated surface: a shared scope banner (everything here respects the
+  // filter bar above), a report builder that just picks WHAT to include, raw-data
+  // downloads, and the saved-report history — all styled as one system.
   function renderExport(v) {
+    var g = state.gameId;
     function link(dataset, format) {
-      return "/api/admin/export" + qs({ game: state.gameId, dataset: dataset, format: format, from: state.from, to: state.to, user: state.player });
+      return "/api/admin/export" + qs({ game: g, dataset: dataset, format: format, from: state.from, to: state.to, user: state.player });
     }
-    var scope = '<b>' + esc(state.gameId) + '</b>' + (state.player ? ' · player <b>' + esc(state.player) + '</b>' : "") + (state.from || state.to ? ' · ' + esc(state.from || "start") + " → " + esc(state.to || "now") : " · all dates");
-    v.innerHTML = '<div class="card"><h3>Download data</h3><p class="cap">Respects the filters above: ' + scope + '</p>' +
-      '<div class="grid2">' +
-      '<div><h4 style="margin:0 0 8px">Analytics events</h4><p class="muted small">Every logged event with its full JSON payload.</p><div class="toolbar"><a class="btn sm" href="' + link("events", "csv") + '">Events · CSV</a><a class="btn ghost sm" href="' + link("events", "json") + '">Events · JSON</a></div></div>' +
-      '<div><h4 style="margin:0 0 8px">Runs / scores</h4><p class="muted small">One row per completed run (score, stars, level, meta).</p><div class="toolbar"><a class="btn sm" href="' + link("scores", "csv") + '">Runs · CSV</a><a class="btn ghost sm" href="' + link("scores", "json") + '">Runs · JSON</a></div></div>' +
-      '</div><p class="muted small" style="margin-top:12px">Tip: add a player in the filter bar to export just their data, or a date range to slice by time.</p></div>';
+    function kb(n) { return n == null ? "—" : n < 1024 ? n + " B" : (n / 1024).toFixed(0) + " KB"; }
+    var players = (state.player ? state.player.split(",") : []).map(function (s) { return s.trim(); }).filter(Boolean);
+
+    // ---- shared scope banner (mirrors the active filter bar) ----
+    var gc = gameColor(g);
+    var chip = function (inner) { return '<span class="exp-chip">' + inner + "</span>"; };
+    var gameChip = chip('<span class="exp-ava" style="background:' + gc + ';color:' + inkOn(gc) + '">' + esc(String(g).slice(0, 1).toUpperCase()) + '</span><b>' + esc(prettyGame(g)) + "</b>");
+    var dateChip = chip('<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2.5"/><path d="M3 9h18M8 2v4M16 2v4"/></svg><b>' + (state.from || state.to ? esc(state.from || "start") + " → " + esc(state.to || "now") : "All dates") + "</b>");
+    var playerChip = chip('<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg><b>' + (players.length ? (players.length === 1 ? esc(players[0]) : players.length + " students") : "All players") + "</b>");
+
+    // ---- report "include" toggle cards ----
+    var SECTIONS = [
+      { key: "summary", label: "Summary", desc: "Key totals like students, sessions, events and runs.", ic: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>' },
+      { key: "engagement", label: "Engagement", desc: "Scores, session length, time of day, plus common patterns and transitions.", ic: '<path d="M5 21V9M12 21V3M19 21v-8"/>' },
+      { key: "timeline", label: "Timeline", desc: "Daily events, sessions and active students over time.", ic: '<path d="M3 15l5-5 4 4 8-9"/>' },
+      { key: "students", label: "Students table", desc: "A table of each student with their sessions, events, runs and best score.", ic: '<circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.3 2.9-5 6.5-5s6.5 1.7 6.5 5"/><path d="M16 6a3 3 0 0 1 0 5.6"/>' },
+    ];
+    var incCards = SECTIONS.map(function (s) {
+      return '<button type="button" class="inc on" data-sec="' + s.key + '" aria-pressed="true">' +
+        '<span class="inc-ic"><svg viewBox="0 0 24 24">' + s.ic + '</svg></span>' +
+        '<span class="inc-txt"><b>' + s.label + '</b><span>' + s.desc + '</span></span>' +
+        '<span class="inc-chk"><svg viewBox="0 0 20 20"><path d="M4 10l4 4 8-9"/></svg></span></button>';
+    }).join("");
+
+    v.innerHTML =
+      '<div class="exp">' +
+      // scope banner
+      '<div class="exp-scope"><div class="exp-scope-l"><svg viewBox="0 0 24 24"><path d="M3 5h18M6 12h12M10 19h4"/></svg>Reports and downloads are based on the game, dates and players selected above</div><div class="exp-chips">' + gameChip + dateChip + playerChip + '</div></div>' +
+
+      '<div class="exp-cols">' +
+      // ---- report builder (primary) ----
+      '<section class="exp-panel">' +
+      '<div class="exp-head"><span class="ic"><svg viewBox="0 0 24 24"><path d="M9 3h6l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5M8.5 13h7M8.5 17h7"/></svg></span>' +
+      '<div><h3>Build a report</h3><p>A shareable report of the current selection. Open it and use <b>Print</b> or <b>Save as PDF</b> to get a PDF. Every report is kept in the history below.</p></div></div>' +
+      '<label class="exp-flabel" for="repTitle">Title</label>' +
+      '<input id="repTitle" placeholder="' + esc(prettyGame(g)) + ' report" value="' + esc(prettyGame(g)) + ' report" />' +
+      '<label class="exp-flabel">Include in the report</label>' +
+      '<div class="inc-grid">' + incCards + '</div>' +
+      '<div class="exp-actions"><button class="btn" id="repGen">Generate report →</button><span class="small muted" id="repStatus"></span></div>' +
+      '<div class="err" id="repErr"></div><div class="small muted" id="repQuota" style="margin-top:8px"></div></section>' +
+
+      // ---- raw downloads (secondary): pick data + format, then download ----
+      '<section class="exp-panel">' +
+      '<div class="exp-head"><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 11l5 5 5-5M5 21h14"/></svg></span><div><h3>Download data</h3><p>Pick what to download and the format, then save the file.</p></div></div>' +
+      '<label class="exp-flabel">Data</label>' +
+      '<div class="seg dl-seg" id="dlDataset"><button class="chip active" data-ds="events">Events</button><button class="chip" data-ds="scores">Runs</button></div>' +
+      '<label class="exp-flabel">Format</label>' +
+      '<div class="seg dl-seg" id="dlFormat"><button class="chip active" data-fmt="csv">CSV</button><button class="chip" data-fmt="json">JSON</button></div>' +
+      '<p class="small muted dl-desc" id="dlDesc"></p>' +
+      '<a class="btn dl-go" id="dlBtn" href="' + link("events", "csv") + '"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 11l5 5 5-5M5 21h14"/></svg> Download <span id="dlBtnLabel"></span></a>' +
+      '</section>' +
+      '</div>' +
+
+      // ---- history ----
+      '<section class="exp-panel" id="repHist"></section>' +
+      '</div>';
+
+    // ---- include toggles ----
+    v.querySelector(".inc-grid").addEventListener("click", function (e) {
+      var c = e.target.closest(".inc"); if (!c) return;
+      var on = c.classList.toggle("on"); c.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    function chosenSections() {
+      var o = {};
+      [].forEach.call(v.querySelectorAll(".inc"), function (el) { o[el.getAttribute("data-sec")] = el.classList.contains("on"); });
+      return o;
+    }
+
+    // ---- download selectors (data + format → one download button) ----
+    var dl = { ds: "events", fmt: "csv" };
+    function updateDl() {
+      $("#dlBtn").href = link(dl.ds, dl.fmt);
+      $("#dlBtnLabel").textContent = (dl.ds === "events" ? "events" : "runs") + " as " + dl.fmt.toUpperCase();
+      $("#dlDesc").textContent = dl.ds === "events"
+        ? "Every logged event with its full JSON payload, one row per event."
+        : "One row per completed run, with its score, stars, level and metadata.";
+    }
+    function bindSeg(id, attr, set) {
+      var el = $(id);
+      el.addEventListener("click", function (e) {
+        var b = e.target.closest("[" + attr + "]"); if (!b) return;
+        [].forEach.call(el.children, function (c) { c.classList.remove("active"); });
+        b.classList.add("active"); set(b.getAttribute(attr)); updateDl();
+      });
+    }
+    bindSeg("#dlDataset", "data-ds", function (val) { dl.ds = val; });
+    bindSeg("#dlFormat", "data-fmt", function (val) { dl.fmt = val; });
+    updateDl();
+
+    // ---- generate (uses the filters above for scope) ----
+    $("#repGen").addEventListener("click", function () {
+      var btn = this, status = $("#repStatus"); $("#repErr").textContent = ""; status.textContent = "";
+      var secs = chosenSections();
+      if (!SECTIONS.some(function (s) { return secs[s.key]; })) { $("#repErr").textContent = "Pick at least one section to include."; return; }
+      status.textContent = "Generating…"; btn.disabled = true;
+      var body = { game: g, title: $("#repTitle").value.trim(), from: state.from, to: state.to, students: players, sections: secs };
+      post("/reports", body).then(function (r) {
+        return r.json().then(function (d) {
+          btn.disabled = false;
+          if (!r.ok) { status.textContent = ""; $("#repErr").textContent = d.detail || "Could not generate report."; loadReportHistory(); return; }
+          status.textContent = "Report ready, opening in a new tab.";
+          window.open("/api/admin/reports/" + d.id, "_blank", "noopener");
+          loadReportHistory();
+        });
+      }).catch(function () { btn.disabled = false; status.textContent = ""; $("#repErr").textContent = "Network error."; });
+    });
+
+    // ---- history ----
+    function loadReportHistory() {
+      api("/reports" + qs({ game: g })).then(function (d) {
+        var host = $("#repHist"); if (!host) return;   // view moved on (tab switched) — skip
+        var reps = d.reports || [];
+
+        // Global cap (enforced server-side too): show usage and block generating
+        // once the limit is reached, so the user isn't left to discover it on submit.
+        var total = d.total != null ? d.total : reps.length, max = d.max || 50, full = total >= max;
+        var quota = $("#repQuota"), gen = $("#repGen");
+        if (quota) quota.textContent = total + " of " + max + " reports saved" + (full ? ". Delete one to make room for a new report." : "");
+        if (gen) gen.disabled = full;
+        var rows = reps.map(function (r) {
+          var range = (r.from || r.to) ? esc(r.from || "start") + " → " + esc(r.to || "now") : "all dates";
+          var who = (r.students && r.students.length) ? r.students.length + " student" + (r.students.length === 1 ? "" : "s") : "all students";
+          return '<tr><td><b>' + esc(r.title) + '</b><div class="small muted">' + range + " · " + who + '</div></td>' +
+            '<td class="muted small">' + esc((r.createdAt || "").slice(0, 16)) + (r.createdBy ? " · " + esc(r.createdBy) : "") + '</td>' +
+            '<td class="num muted small">' + kb(r.bytes) + '</td>' +
+            '<td><div class="rep-hactions"><a class="btn ghost sm" href="/api/admin/reports/' + r.id + '" target="_blank" rel="noopener">View</a>' +
+            '<a class="btn ghost sm" href="/api/admin/reports/' + r.id + '?download=1">Download</a>' +
+            '<button class="btn danger sm" data-del="' + r.id + '">Delete</button></div></td></tr>';
+        }).join("");
+        host.innerHTML = '<div class="exp-head" style="margin-bottom:14px"><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 8v4l3 2M21 12a9 9 0 1 1-9-9 9 9 0 0 1 9 9z"/></svg></span><div><h3>Report history</h3><p>Previously generated reports for ' + esc(prettyGame(g)) + '.</p></div><span class="pill">' + reps.length + '</span></div>' +
+          (rows ? '<div class="tbl-wrap"><table class="imp-list"><thead><tr><th>Report</th><th>Generated</th><th class="num">Size</th><th class="no-sort"></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+            : '<p class="muted small" style="margin:0">No reports yet. Build one above and it will appear here.</p>');
+        [].forEach.call(host.querySelectorAll("[data-del]"), function (b) {
+          b.addEventListener("click", function () {
+            if (!confirm("Delete this report? This can’t be undone.")) return;
+            del("/reports/" + b.getAttribute("data-del")).then(function () { loadReportHistory(); }).catch(function () {});
+          });
+        });
+      }).catch(function () { $("#repHist").innerHTML = ""; });
+    }
+    loadReportHistory();
   }
 
   // ---- Accounts -------------------------------------------------------------

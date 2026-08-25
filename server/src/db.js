@@ -113,6 +113,25 @@ db.exec(`
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_imports_game ON imports(game_id);
+
+  -- One row per generated report (Export tab → "Build a report"). Stores the
+  -- self-contained HTML so a saved report can be re-viewed / downloaded / printed
+  -- to PDF later, plus the scope it was built for (date range, students, sections)
+  -- so the history list can describe it without re-running anything.
+  CREATE TABLE IF NOT EXISTS reports (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id    TEXT    NOT NULL,
+    title      TEXT,
+    date_from  TEXT,               -- inclusive lower bound (may include a time)
+    date_to    TEXT,               -- inclusive upper bound (may include a time)
+    students   TEXT,               -- JSON array of usernames ([] = all students)
+    sections   TEXT,               -- JSON of the chosen sections
+    bytes      INTEGER,            -- size of the stored html
+    html       TEXT    NOT NULL,   -- the full self-contained report document
+    created_by TEXT,               -- admin username that generated it
+    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_reports_game ON reports(game_id, created_at);
 `);
 
 // Migration: existing DBs pre-date the import-batch columns. The tables above are

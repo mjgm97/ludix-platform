@@ -24,10 +24,24 @@ function userList(query) {
   });
   return out.slice(0, 50);
 }
+// Normalise a from/to bound to a "YYYY-MM-DD HH:MM:SS" string comparable to
+// `created_at`. A plain date fills the whole day (00:00:00 / 23:59:59), so the
+// existing day-granular dashboard filters behave exactly as before. A value that
+// carries a time (e.g. a datetime-local "2026-08-25T14:30" from the report
+// builder) is honoured to the second, with the missing seconds padded so the
+// bound stays inclusive on the `to` side.
+function normBound(v, end) {
+  let s = String(v).trim().replace("T", " ");
+  if (s.length <= 10) return s.slice(0, 10) + (end ? " 23:59:59" : " 00:00:00");
+  s = s.slice(0, 19);
+  if (s.length === 13) s += end ? ":59:59" : ":00:00";   // YYYY-MM-DD HH
+  else if (s.length === 16) s += end ? ":59" : ":00";    // YYYY-MM-DD HH:MM
+  return s;
+}
 function filterParams(query) {
   const p = {};
-  if (query.from) p.from = String(query.from).slice(0, 10) + " 00:00:00";
-  if (query.to) p.to = String(query.to).slice(0, 10) + " 23:59:59";
+  if (query.from) p.from = normBound(query.from, false);
+  if (query.to) p.to = normBound(query.to, true);
   userList(query).forEach((u, i) => { p["user" + i] = u; });
   return p;
 }
@@ -136,4 +150,4 @@ function rng(seed) {
 // they key transitions identically.
 const SEP = String.fromCharCode(1);
 
-module.exports = { filterParams, whereFor, joinFor, userList, num, round, csvCell, toCsv, fillDays, histogram, memo, memoBust, rng, SEP };
+module.exports = { filterParams, normBound, whereFor, joinFor, userList, num, round, csvCell, toCsv, fillDays, histogram, memo, memoBust, rng, SEP };

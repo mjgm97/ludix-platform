@@ -20,6 +20,7 @@ const tna = require("./tna");
 const pm = require("./process-mining");
 const predict = require("./predict");
 const importer = require("./import");
+const reports = require("./reports");
 
 // Bucket labels for the score (%) and session-length (min) histograms. The
 // bucket edges live inline in the SQL that fills them (see /summary).
@@ -545,6 +546,11 @@ function mount(router) {
     console.error("import error:", e);
     res.status(500).json({ error: "server_error", detail: "Import failed unexpectedly." });
   }
+
+  // ---- Reports: build / list / view / download / delete ---------------------
+  // Self-contained HTML reports (printable to PDF) built from the same analytics
+  // as the dashboard, scoped by date/time + selected students. See reports.js.
+  reports.mount(router);
 }
 
 module.exports = { mount };
