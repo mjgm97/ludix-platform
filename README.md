@@ -22,19 +22,20 @@
 
 ---
 
-**Ludix** is a research-grade platform that turns the raw event stream of *any* serious game into
-reproducible learning analytics. A single Node/Express/SQLite backend hosts any number of
-self-contained games, collects a generic play-event log, and exposes, through one educator
-dashboard, a coherent analytics pipeline that would otherwise require stitching together several
-research tools: engagement and learning-analytics metrics, **process mining**, **transition-network
-analysis (TNA)**, **behaviour-based sequence clustering**, statistical **pattern→outcome** mining,
-and **explainable predictive modelling** with exact SHAP.
+**Ludix** is a platform for studying how people learn inside serious games. It hosts a suite of
+games, records how each one is played, and turns that activity into learning analytics that researchers can reproduce and report.
 
-Crucially, every analysis is computed from a game-independent `case · activity · timestamp · actor`
-event envelope (the standard process-mining quadruple), so **the same methods apply to every game
-with no per-game code, and to event logs imported from outside Ludix entirely**. Ludix is therefore
-usable both as a ready-to-run games-plus-analytics suite *and* as a stand-alone analysis workbench
-for existing serious-game telemetry.
+What makes it more than a descriptive dashboard is that it is also **inferential**. Alongside the
+usual engagement metrics, Ludix brings together advanced methods that normally live in separate research
+tools, including process mining, transition-network analysis, behaviour-based clustering, and
+explainable prediction, and it backs its findings with real statistics: bootstrapped confidence on
+network edges, permutation tests between groups, and effect estimates corrected for multiple
+comparisons. The point is to tell a genuine pattern from noise, not just to draw a nice chart.
+
+All of this works from one simple idea of an event: a record of who did what, and when. Because every
+analysis reads that shared format, the same methods apply to any game with no extra code, and to
+event logs imported from other systems. Ludix can serve as a ready-to-run suite of games with
+analytics attached, or as a stand-alone workbench for serious-game data you already have.
 
 <div align="center">
 <img alt="Ludix educator dashboard overview" src="docs/img/overview.jpg" width="92%">
