@@ -24,20 +24,20 @@
 
 **Ludix** is a research-grade platform that turns the raw event stream of *any* serious game into
 reproducible learning analytics. A single Node/Express/SQLite backend hosts any number of
-self-contained games, collects a generic play-event log, and exposes — through one educator
-dashboard — a coherent analytics pipeline that would otherwise require stitching together several
+self-contained games, collects a generic play-event log, and exposes, through one educator
+dashboard, a coherent analytics pipeline that would otherwise require stitching together several
 research tools: engagement and learning-analytics metrics, **process mining**, **transition-network
 analysis (TNA)**, **behaviour-based sequence clustering**, statistical **pattern→outcome** mining,
 and **explainable predictive modelling** with exact SHAP.
 
 Crucially, every analysis is computed from a game-independent `case · activity · timestamp · actor`
-event envelope — the standard process-mining quadruple — so **the same methods apply to every game
+event envelope (the standard process-mining quadruple), so **the same methods apply to every game
 with no per-game code, and to event logs imported from outside Ludix entirely**. Ludix is therefore
 usable both as a ready-to-run games-plus-analytics suite *and* as a stand-alone analysis workbench
 for existing serious-game telemetry.
 
 <div align="center">
-<img alt="Ludix educator dashboard — overview" src="docs/img/overview.jpg" width="92%">
+<img alt="Ludix educator dashboard overview" src="docs/img/overview.jpg" width="92%">
 <br><em>One dashboard for a whole suite of games. Every view is scoped by game, date range, and cohort, and computed from a single generic event log.</em>
 </div>
 
@@ -49,7 +49,7 @@ games, means re-implementing the analytics each time. Ludix addresses this with 
 commitments aimed squarely at the research community:
 
 - **Game-agnostic by construction.** All analytics read a generic event envelope, so a method
-  validated on one game transfers unchanged to the next — and to logs that were never produced by
+  validated on one game transfers unchanged to the next, and to logs that were never produced by
   Ludix (see [Bring your own data](#bring-your-own-data)).
 - **Method provenance and rigor, not black boxes.** The heavy statistics are delegated to validated
   implementations rather than re-derived: transition-network analysis, centralities, bootstrap edge
@@ -65,7 +65,7 @@ commitments aimed squarely at the research community:
 
 | For researchers | For educators & practitioners | For game developers |
 |:--|:--|:--|
-| A reproducible, game-agnostic analytics pipeline (process mining, TNA, clustering, XAI) over a standard event model, exportable for publication | A single dashboard to see how students actually play — engagement, learning curves, common paths, and cohorts — with no data-science setup | A template that ships already wired into identity, scoring, and the full analytics stack; instrument a game with three calls |
+| A reproducible, game-agnostic analytics pipeline (process mining, TNA, clustering, XAI) over a standard event model, exportable for publication | A single dashboard to see how students actually play (engagement, learning curves, common paths, cohorts) with no data-science setup | A template that ships already wired into identity, scoring, and the full analytics stack; instrument a game with three calls |
 
 ## The analytics
 
@@ -75,26 +75,26 @@ Views can be scoped by **game**, **date range**, and one or more **students/coho
 ### Engagement & learning-analytics metrics
 
 Beyond activity counts, the **General** tab reports research-oriented indicators derived from the
-generic log: a **learning curve** (mean score by attempt number), **effort–performance**
+generic log: a **learning curve** (mean score by attempt number), an **effort/performance**
 correlation (session length / event volume vs. outcome, with Pearson *r*), a **player-retention
 survival curve**, and an **engagement-inequality** view (Lorenz curve + Gini) quantifying how
 concentrated participation is across learners.
 
 <div align="center">
 <img alt="Engagement and learning-analytics metrics" src="docs/img/general.jpg" width="92%">
-<br><em>Engagement at a glance — KPIs, activity over time, new-vs-returning players, and score/session distributions; the tab continues with a research-analytics block (learning curve, effort–performance correlation, retention survival, and Lorenz/Gini engagement inequality).</em>
+<br><em>Engagement at a glance: KPIs, activity over time, new-vs-returning players, and score/session distributions. The tab continues with a research-analytics block (learning curve, effort/performance correlation, retention survival, and Lorenz/Gini engagement inequality).</em>
 </div>
 
 ### Process mining
 
 The **Process** tab reconstructs how sessions move through a game: per-activity statistics, the
-**directly-follows graph**, **start/end** activities, and **trace variants** — the distinct raw
+**directly-follows graph**, **start/end** activities, and **trace variants**, the distinct raw
 paths learners take, ranked by frequency and coverage. Variants are standard raw traces (repeated
 loops are shown in full, not collapsed), and longer *n*-step routines are surfaced as 3- and 4-step
 directly-follows chains. Process discovery is delegated to ladyna’s `processmining` module.
 
 <div align="center">
-<img alt="Process mining — activities, trace variants, directly-follows graph" src="docs/img/process.jpg" width="92%">
+<img alt="Process mining: activities, trace variants, directly-follows graph" src="docs/img/process.jpg" width="92%">
 <br><em>Process statistics, the activity mix, and the most common event sequences (each row expandable); the directly-follows graph and start/end activities follow below.</em>
 </div>
 
@@ -104,7 +104,7 @@ Each game is modelled as a first-order **Markov transition network**: activities
 directed edge A→B carries the transition probability *P(B | A)*. The view derives **initial-state
 probabilities**, the full R-`tna` set of **node/edge centralities** (out/in-strength, betweenness,
 closeness, PageRank, …), a **sequence index plot**, **state cliques**, and optional **bootstrap edge
-validation** — which transitions are statistically stable rather than noise. TNA is a recent
+validation** (which transitions are statistically stable rather than noise). TNA is a recent
 learning-analytics method [[1]](#references); Ludix makes it available game-agnostically and
 interactively.
 
@@ -119,7 +119,7 @@ Sessions are grouped by **how** learners move through a game, then each cluster�
 and sequence-index plot are compared side by side. Clustering runs on a **validated sequence
 dissimilarity** (Levenshtein / edit-distance family, Euclidean, Manhattan, cosine, or
 Jensen–Shannon) with **PAM (k-medoids)**, agglomerative linkage, or k-means, and reports a
-**silhouette** score for the partition — turning “types of players” into a defensible, quantified
+**silhouette** score for the partition, turning “types of players” into a defensible, quantified
 split.
 
 <div align="center">
@@ -131,8 +131,8 @@ split.
 
 The **Prediction** tab estimates a run-level outcome (score, stars, session length, or pass/fail)
 from behaviour features folded from that run’s event stream, then **explains** the model. Estimators
-are dependency-free implementations — **gradient-boosted trees**, random forest, a single decision
-tree, and linear/logistic regression — and explanations use **exact path-dependent TreeSHAP** for
+are dependency-free implementations (**gradient-boosted trees**, random forest, a single decision
+tree, and linear/logistic regression), and explanations use **exact path-dependent TreeSHAP** for
 both **global** feature importance and **per-run local** attributions (a waterfall from the model’s
 baseline to its prediction). Held-out diagnostics (R²/RMSE/MAE vs. a naïve baseline, predicted-vs-
 actual) keep the model honest. This brings interpretable machine learning to game telemetry without
@@ -146,15 +146,15 @@ a Python/R stack.
 ### Statistical pattern→outcome mining and cohort comparison
 
 The Network tab also mines **frequent behavioural patterns** and screens each for association with a
-run outcome — the change in Score/Stars when a pattern is present (OLS), or its log-odds for Pass
-(logistic) — with **Benjamini–Hochberg** adjustment for multiple testing. A **cohort comparison**
+run outcome: the change in Score/Stars when a pattern is present (OLS), or its log-odds for Pass
+(logistic), with **Benjamini–Hochberg** adjustment for multiple testing. A **cohort comparison**
 splits sessions on a median outcome and contrasts the two transition networks edge-by-edge with a
 **permutation test**, flagging transitions that genuinely differ between higher- and lower-performing
 learners.
 
 ## Bring your own data
 
-Because the analytics read a generic event log, they run on **any** log — not only data collected
+Because the analytics read a generic event log, they run on **any** log, not only data collected
 through Ludix. The dashboard’s **Import** tab takes a CSV or JSON log, auto-detects the
 case / activity / timestamp / actor columns (the standard process-mining quadruple), and imports it
 under a game name, where every view above applies. A file exported from the **Export** tab
@@ -162,7 +162,7 @@ re-imports exactly, so datasets and figures are shareable and reproducible.
 
 ## Methods & reproducibility
 
-A short note on how much of this you can trust, and why the numbers hold up.
+All methods used are validated against rigorous statistical frameworks to guarantee reliable, reproducible outcomes:
 
 - **We don't reinvent the statistics.** The transition networks, centralities, edge validation and
   sequence clustering are computed by [ladyna](https://github.com/mohsaqr/tna-js) [[2]](#references),
@@ -171,14 +171,13 @@ A short note on how much of this you can trust, and why the numbers hold up.
   from the same library.
 - **The model explanations are exact, not approximate.** Feature importance uses **SHAP / TreeSHAP**
   [[3]](#references) [[4]](#references), which traces each prediction back to the inputs that produced
-  it — and the pieces always add up to the model's output, so nothing is hand-waved.
-- **Re-running gives the same answer.** Anything with a random step in it — the bootstrap, the
-  clustering, the train/test split — is driven by a fixed seed, so the same data and the same
+  it.
+- **Re-running gives the same answer.** Anything with a random step in it (the bootstrap, the
+  clustering, the train/test split) is driven by a fixed seed, so the same data and the same
   settings reproduce the same figures.
 - **Everything rests on one simple event shape.** An event is just *who* did *what*, *when*, in
-  *which* session (actor · activity · timestamp · case) — the same shape process-mining tools expect
-  [[8]](#references) — which is exactly why the analyses move freely between games and accept data
-  from outside Ludix.
+  *which* session (the same shape process-mining tools expect [[8]](#references)), which is exactly
+  why the analyses move freely between games and accept data from outside Ludix.
 - **The methods are standard ones, not homemade.** Under the hood: directly-follows process
   discovery and trace variants [[8]](#references); first-order Markov transition networks
   [[1]](#references); the usual network centralities; k-medoids / hierarchical / k-means clustering
@@ -189,11 +188,11 @@ A short note on how much of this you can trust, and why the numbers hold up.
 
 ## Design
 
-- **One server for every game.** A single small Node/Express/SQLite backend runs the whole suite. There is one database file, created automatically the first time you start it — nothing to migrate or set up.
+- **One server for every game.** A single small Node/Express/SQLite backend runs the whole suite. There is one database file, created automatically the first time you start it, with nothing to migrate or set up.
 - **The analytics don't care which game sent the data.** Games just report runs and events tagged with a game id; engagement, process mining, network analysis, clustering and prediction all work off that shared stream, so adding a game adds no analytics code.
-- **The dashboard has no build step.** Its charts, networks and SHAP plots are drawn as plain inline SVG — no bundler, no CDN, no front-end framework — which keeps it easy to read, host, and check for yourself.
+- **The dashboard has no build step.** Its charts, networks and SHAP plots are drawn as plain inline SVG (no bundler, no CDN, no front-end framework), which keeps it easy to read, host, and check for yourself.
 - **Adding a game means copying the template.** The copy already knows how to sign a player in, record scores, feed the leaderboard, and stream analytics; anything you build with an `index.html` shows up on the landing page.
-- **No passwords for learners.** A student picks a unique name once and gets a private token that lets only them submit under it — simple enough for a classroom, with no accounts to manage.
+- **No passwords for learners.** A student picks a unique name once and gets a private token that lets only them submit under it, which is simple enough for a classroom, with no accounts to manage.
 
 <div align="center">
 <img alt="Ludix learner landing page" src="docs/img/landing.jpg" width="80%">
@@ -210,15 +209,15 @@ npm start                # run the suite (builds missing games on first boot)
 
 Then open:
 
-- http://localhost:3000/ — the player landing page (a card per game)
-- http://localhost:3000/quick-tap/ — Quick Tap, the bundled reference game
-- http://localhost:3000/admin — the educator dashboard
+- http://localhost:3000/ (the player landing page, a card per game)
+- http://localhost:3000/quick-tap/ (Quick Tap, the bundled reference game)
+- http://localhost:3000/admin (the educator dashboard)
 
 The dashboard needs an admin account, and a seeded demo makes every analysis explorable immediately:
 
 ```bash
 cd server && npm run admin -- add teacher "a-good-password"
-npm run seed:demo        # sample players, runs and events across three games —
+npm run seed:demo        # sample players, runs and events across three games, so
                          # engagement, process mining, TNA, clustering and prediction all work off it
 ```
 
@@ -227,7 +226,7 @@ Everything else is configured in `server/.env` (copy `server/.env.example`). See
 
 ## Add a game
 
-Copy the template — a complete game already wired into identity, scoring, analytics, and the
+Copy the template, a complete game already wired into identity, scoring, analytics, and the
 leaderboard:
 
 ```bash
@@ -274,8 +273,8 @@ Source (`games/`) is built into served bundles (`dist/`). Each `dist/` subfolder
 
 The methods and libraries Ludix builds on:
 
-1. **`tna` — Transition Network Analysis** (R package). Saqr, M., López-Pernas, S., et al. CRAN: <https://cran.r-project.org/package=tna>
-2. **ladyna / `tna-js`** — JavaScript port of `tna` used by Ludix. <https://github.com/mohsaqr/tna-js>
+1. **`tna`, Transition Network Analysis** (R package). Saqr, M., López-Pernas, S., et al. CRAN: <https://cran.r-project.org/package=tna>
+2. **ladyna / `tna-js`**, a JavaScript port of `tna` used by Ludix. <https://github.com/mohsaqr/tna-js>
 3. Lundberg, S. M., & Lee, S.-I. (2017). *A Unified Approach to Interpreting Model Predictions.* NeurIPS. arXiv:[1705.07874](https://arxiv.org/abs/1705.07874)
 4. Lundberg, S. M., et al. (2020). *From local explanations to global understanding with explainable AI for trees* (TreeSHAP). *Nature Machine Intelligence*, 2, 56–67.
 5. Rousseeuw, P. J. (1987). *Silhouettes: a graphical aid to the interpretation and validation of cluster analysis.* *Journal of Computational and Applied Mathematics*, 20, 53–65.
