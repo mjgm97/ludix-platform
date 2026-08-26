@@ -311,6 +311,50 @@ curl -X POST localhost:3000/api/games/quick-tap/scores \
   }'
 ```
 
+**Send events** — `POST /api/games/:gameId/events`
+
+Stream a batch of analytics events. The request body is JSON:
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `username` | string | yes | The player these events belong to (must have claimed a name). |
+| `token` | string | yes | That player's private token (from claiming the name). |
+| `session_id` | string | no | The session (trace) the batch belongs to; can also be set per event as `sessionId`. |
+| `events` | array | yes | The event objects (up to `MAX_EVENTS`, default 5000; older ones are trimmed if you send more). |
+
+Each object in `events` may carry these recognised fields — all optional, but
+`type` is what the analytics key on. Each maps to its own column so it's
+queryable; **every other key you include is kept too**, because the whole event
+object is stored verbatim as JSON in the `payload` column (so game-specific
+fields like `x`, `y`, `correct`, `score` survive round-trips through the feed and
+exports).
+
+| Event field | Type | Stored column | Purpose |
+|---|---|---|---|
+| `type` | string | `type` | The activity / event name — the nodes of the process & network views. |
+| `t` | number (ms) | `t_ms` | Elapsed time since the session started — drives session duration and timing. |
+| `iso` | string (ISO 8601) | `iso` | Wall-clock timestamp of the event. |
+| `seq` | number | `seq` | Explicit order within the session (used to break ties). |
+| `sessionId` | string | `session_id` | Per-event session override (falls back to the batch-level `session_id`). |
+
+Response: `201 { "ok": true, "stored": <n> }` (an empty batch returns
+`{ "ok": true, "stored": 0 }`). Auth failures are `404 no_such_player` or
+`401 bad_token`. Events can also be sent inline with a run via the `events` array
+on `/scores` (same event-object shape).
+
+```bash
+curl -X POST localhost:3000/api/games/quick-tap/events \
+  -H 'Content-Type: application/json' -d '{
+    "username":"ada_lovelace","token":"…",
+    "session_id":"sess-abc",
+    "events":[
+      { "seq":0, "type":"round_start", "t":0,     "iso":"2026-08-26T10:00:00.000Z" },
+      { "seq":1, "type":"hit",         "t":812,   "iso":"2026-08-26T10:00:00.812Z", "x":140, "y":90 },
+      { "seq":2, "type":"round_end",   "t":20000, "iso":"2026-08-26T10:00:20.000Z", "score":12 }
+    ]
+  }'
+```
+
 ---
 
 ## Data model
